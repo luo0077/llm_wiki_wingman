@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Input } from "@/components/ui/input"
@@ -16,6 +16,7 @@ import {
   SEARXNG_CATEGORY_OPTIONS,
   SERPAPI_ENGINE_OPTIONS,
   resolveSearchConfig,
+  webSearch,
 } from "@/lib/web-search"
 
 const SEARCH_PROVIDERS = [
@@ -24,28 +25,34 @@ const SEARCH_PROVIDERS = [
     label: "Ollama",
     hint: "Ollama Web Search API",
     keyPlaceholder: "Enter your Ollama API key (ollama.com)",
-    needsApiKey: true,
+    configKind: "key",
   },
   {
     id: "tavily",
     label: "Tavily",
     hint: "General web search for Deep Research",
     keyPlaceholder: "Enter your Tavily API key (tavily.com)",
-    needsApiKey: true,
+    configKind: "key",
   },
   {
     id: "serpapi",
     label: "SerpApi",
     hint: "Google, Bing, DuckDuckGo, Scholar, News, Images, Videos, YouTube",
     keyPlaceholder: "Enter your SerpApi API key (serpapi.com)",
-    needsApiKey: true,
+    configKind: "key",
   },
   {
     id: "searxng",
     label: "SearXNG",
     hint: "Self-hosted metasearch via the SearXNG JSON API",
     urlPlaceholder: "https://search.example.com",
-    needsApiKey: false,
+    configKind: "url",
+  },
+  {
+    id: "firecrawl",
+    label: "Firecrawl",
+    hint: "Anonymous Firecrawl Search API",
+    configKind: "none",
   },
 ] as const
 
@@ -59,6 +66,8 @@ export function WebSearchSection() {
   const showBroadAnyTxtWarning = isBroadAnyTxtFilterDir(anyTxtFilterDir)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [savedId, setSavedId] = useState<string | null>(null)
+  const [testStatus, setTestStatus] = useState<Record<string, { state: "testing" | "ok" | "warning" | "error"; message: string }>>({})
+  const testRunRef = useRef<Record<string, number>>({})
 
   async function persist(next: SearchApiConfig) {
     const { saveSearchApiConfig } = await import("@/lib/project-store")
@@ -67,6 +76,12 @@ export function WebSearchSection() {
   }
 
   function updateProvider(id: Exclude<SearchProvider, "none">, patch: SearchProviderOverride) {
+    setTestStatus((prev) => {
+      if (!prev[id]) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
     const currentConfigs = resolvedConfig.providerConfigs ?? {}
     const merged = { ...(currentConfigs[id] ?? {}), ...patch }
     const nextConfigs = { ...currentConfigs, [id]: merged }
@@ -82,6 +97,38 @@ export function WebSearchSection() {
   function toggleActive(id: Exclude<SearchProvider, "none">) {
     const nextProvider = resolvedConfig.provider === id ? "none" : id
     persist(resolveSearchConfig({ ...resolvedConfig, provider: nextProvider })).catch(() => {})
+  }
+
+  async function testProvider(id: Exclude<SearchProvider, "none">) {
+    const runId = (testRunRef.current[id] ?? 0) + 1
+    testRunRef.current[id] = runId
+    const testConfig = resolveSearchConfig({ ...resolvedConfig, provider: id })
+    setTestStatus((prev) => ({
+      ...prev,
+      [id]: { state: "testing", message: t("settings.sections.webSearch.testRunning") },
+    }))
+    try {
+      const results = await webSearch("wikipedia", testConfig, 1)
+      if (testRunRef.current[id] !== runId) return
+      setTestStatus((prev) => ({
+        ...prev,
+        [id]: {
+          state: results.length > 0 ? "ok" : "warning",
+          message: results.length > 0
+            ? t("settings.sections.webSearch.testSuccess", { count: results.length })
+            : t("settings.sections.webSearch.testNoResults"),
+        },
+      }))
+    } catch (err) {
+      if (testRunRef.current[id] !== runId) return
+      setTestStatus((prev) => ({
+        ...prev,
+        [id]: {
+          state: "error",
+          message: localizeSearchTestError(err, t),
+        },
+      }))
+    }
   }
 
   function updateDeepResearchSource(deepResearchSource: DeepResearchSource) {
@@ -231,9 +278,11 @@ export function WebSearchSection() {
         {SEARCH_PROVIDERS.map((provider) => {
           const override = resolvedConfig.providerConfigs?.[provider.id]
           const isActive = resolvedConfig.provider === provider.id
-          const hasConfig = provider.id === "searxng"
-            ? !!override?.searXngUrl
-            : !!override?.apiKey
+          const hasConfig = provider.configKind === "none"
+            ? true
+            : provider.id === "searxng"
+              ? !!override?.searXngUrl
+              : !!override?.apiKey
           const isExpanded = !!expanded[provider.id]
           return (
             <div
@@ -300,7 +349,19 @@ export function WebSearchSection() {
 
               {isExpanded && (
                 <div className="space-y-4 border-t bg-background/50 px-4 py-3">
-                  {provider.needsApiKey ? (
+                  {provider.configKind === "url" ? (
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.instanceUrl")}</Label>
+                      <Input
+                        value={override?.searXngUrl ?? resolvedConfig.searXngUrl ?? ""}
+                        onChange={(e) => updateProvider(provider.id, { searXngUrl: e.target.value })}
+                        placeholder={provider.urlPlaceholder}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {t("settings.sections.webSearch.searxngJsonHint")}
+                      </p>
+                    </div>
+                  ) : provider.configKind !== "none" ? (
                     <div className="space-y-2">
                       <Label>{t("settings.apiKey")}</Label>
                       <Input
@@ -316,17 +377,9 @@ export function WebSearchSection() {
                       )}
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      <Label>{t("settings.sections.webSearch.instanceUrl")}</Label>
-                      <Input
-                        value={override?.searXngUrl ?? resolvedConfig.searXngUrl ?? ""}
-                        onChange={(e) => updateProvider("searxng", { searXngUrl: e.target.value })}
-                        placeholder={provider.urlPlaceholder}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        {t("settings.sections.webSearch.searxngJsonHint")}
-                      </p>
-                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {t("settings.sections.webSearch.firecrawlHint")}
+                    </p>
                   )}
 
                   {provider.id === "serpapi" && (
@@ -342,6 +395,36 @@ export function WebSearchSection() {
                       onChange={(searXngCategories) => updateProvider("searxng", { searXngCategories })}
                     />
                   )}
+
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => testProvider(provider.id)}
+                      disabled={!hasConfig || testStatus[provider.id]?.state === "testing"}
+                      className="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {!hasConfig
+                        ? t("settings.sections.webSearch.configureBeforeTesting")
+                        : testStatus[provider.id]?.state === "testing"
+                        ? t("settings.sections.webSearch.testRunning")
+                        : t("settings.sections.webSearch.testProvider")}
+                    </button>
+                    {testStatus[provider.id] && (
+                      <p
+                        className={`text-xs ${
+                          testStatus[provider.id].state === "ok"
+                            ? "text-emerald-600"
+                            : testStatus[provider.id].state === "warning"
+                              ? "text-amber-600"
+                            : testStatus[provider.id].state === "error"
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {testStatus[provider.id].message}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -350,6 +433,20 @@ export function WebSearchSection() {
       </div>
     </div>
   )
+}
+
+function localizeSearchTestError(err: unknown, t: ReturnType<typeof useTranslation>["t"]): string {
+  const message = err instanceof Error ? err.message : String(err)
+  if (/Firecrawl anonymous search is blocked for this IP/i.test(message)) {
+    return t("settings.sections.webSearch.firecrawlIpBlocked")
+  }
+  if (/Network error reaching Firecrawl Search/i.test(message)) {
+    return t("settings.sections.webSearch.firecrawlNetworkError")
+  }
+  if (/Firecrawl search returned an invalid JSON response/i.test(message)) {
+    return t("settings.sections.webSearch.firecrawlInvalidJson")
+  }
+  return t("settings.sections.webSearch.testFailed", { message })
 }
 
 function isBroadAnyTxtFilterDir(value: string): boolean {
