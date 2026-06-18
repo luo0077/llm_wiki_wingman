@@ -18,6 +18,13 @@ jobs:
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
             rust_target: aarch64-apple-darwin
+          # Intel macOS build. macos-13 is GitHub's last x86_64 runner
+          # (macos-14+ are Apple Silicon), so this is a NATIVE build —
+          # no cross-compile. Restores the Intel .dmg dropped after
+          # v0.2.0, when the macOS matrix narrowed to aarch64 only.
+          - platform: macos-13
+            args: '--target x86_64-apple-darwin'
+            rust_target: x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ''
             rust_target: ''
@@ -42,7 +49,7 @@ jobs:
           targets: ${{ matrix.rust_target }}
 
       - name: Install protoc (macOS)
-        if: matrix.platform == 'macos-latest'
+        if: startsWith(matrix.platform, 'macos-')
         run: brew install protobuf
 
       - name: Install dependencies (Ubuntu)
