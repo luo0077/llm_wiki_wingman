@@ -28,6 +28,7 @@ import { detectLanguage } from "@/lib/detect-language"
 import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { inferWikiTypeFromPath } from "@/lib/wiki-page-types"
+import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from "@/lib/chat-save-to-wiki"
 
 // Module-level cache of source file names
 let cachedSourceFiles: string[] = []
@@ -192,17 +193,10 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       // See `src/lib/wiki-filename.ts` — the slug is Unicode-aware
       // (so CJK titles don't collapse to empty) and the HHMMSS
       // timestamp suffix guarantees same-day saves stay distinct.
-      const firstLine = content.split("\n")[0].replace(/^#+\s*/, "").trim()
-      const title = firstLine.slice(0, 60) || "Saved Query"
+      const cleanContent = cleanAssistantContentForWikiSave(content)
+      const title = titleFromCleanAssistantContent(cleanContent)
       const { date, fileName } = makeQueryFileName(title)
       const filePath = `${pp}/wiki/queries/${fileName}`
-
-      // Strip hidden sources comment and thinking blocks from content
-      const cleanContent = content
-        .replace(/<!--\s*sources:.*?-->/g, "")
-        .replace(/<think(?:ing)?>\s*[\s\S]*?<\/think(?:ing)?>\s*/gi, "")
-        .replace(/<think(?:ing)?>\s*[\s\S]*$/gi, "")
-        .trimEnd()
 
       const frontmatter = [
         "---",

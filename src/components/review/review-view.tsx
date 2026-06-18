@@ -19,6 +19,7 @@ import { normalizePath } from "@/lib/path-utils"
 import { hasConfiguredDeepResearchSources } from "@/lib/web-search"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { createReviewPageDrafts } from "@/lib/review-create-page"
+import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from "@/lib/chat-save-to-wiki"
 import { useTranslation } from "react-i18next"
 
 const typeConfig: Record<ReviewItem["type"], { icon: typeof AlertTriangle; label: string; color: string }> = {
@@ -66,14 +67,8 @@ export function ReviewView() {
         const encoded = action.slice(5)
         const content = decodeURIComponent(atob(encoded))
 
-        // Strip hidden comments
-        const cleanContent = content
-          .replace(/<!--\s*save-worthy:.*?-->/g, "")
-          .replace(/<!--\s*sources:.*?-->/g, "")
-          .trimEnd()
-
-        const firstLine = cleanContent.split("\n").find((l) => l.trim() && !l.startsWith("<!--"))?.replace(/^#+\s*/, "").trim() ?? "Saved Query"
-        const title = firstLine.slice(0, 60) || "Saved Query"
+        const cleanContent = cleanAssistantContentForWikiSave(content)
+        const title = titleFromCleanAssistantContent(cleanContent)
         const { date, fileName } = makeQueryFileName(title)
         const filePath = `${pp}/wiki/queries/${fileName}`
 
