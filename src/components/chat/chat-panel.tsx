@@ -381,6 +381,8 @@ export function ChatPanel() {
               ? "- Answer based ONLY on the numbered wiki pages and external sources provided below."
               : "- Answer based ONLY on the numbered wiki pages provided below.",
             "- If the provided pages don't contain enough information, say so honestly.",
+            "- Keep subject boundaries strict: do not apply a claim, limitation, evaluation, benchmark result, or recommendation about one entity/model/product/method to another subject just because they share keywords.",
+            "- If pages or external sources discuss multiple subjects, attribute each claim to the exact subject named in that page or source; when uncertain, state the uncertainty instead of generalizing.",
             "- Use [[wikilink]] syntax to reference wiki pages.",
             externalContext
               ? "- When citing wiki information, use page numbers like [1], [2]. When citing external information, use external source IDs like [E1], [E2]."
