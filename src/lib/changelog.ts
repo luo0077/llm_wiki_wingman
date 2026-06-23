@@ -26,6 +26,38 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.26",
+    date: "2026-06-23",
+    highlights: {
+      en: [
+        "Merged recent community PR fixes and cleaned up release documentation.",
+        "Fixed release build issues around bundled resources and PDFium binaries.",
+        "Added Intel x86_64 macOS client support to the release build.",
+      ],
+      zh: [
+        "合并近期社区 PR 修复，并清理发布文档。",
+        "修复发布构建中随包资源和 PDFium 二进制相关问题。",
+        "新增 Intel x86_64 Mac 客户端的发布构建支持。",
+      ],
+    },
+  },
+  {
+    version: "0.4.25",
+    date: "2026-06-23",
+    highlights: {
+      en: [
+        "Added Firecrawl as a Web Search provider with friendlier handling for anonymous search limits.",
+        "Fixed a batch of reported UI, import, search, and provider compatibility bugs.",
+        "Improved release build preparation for bundled MCP resources.",
+      ],
+      zh: [
+        "新增 Firecrawl 网页搜索 Provider，并优化匿名搜索受限时的提示。",
+        "修复一批用户反馈的界面、导入、搜索和 Provider 兼容性问题。",
+        "改进发布构建中 MCP 随包资源的准备流程。",
+      ],
+    },
+  },
+  {
     version: "0.4.24",
     date: "2026-06-16",
     highlights: {
