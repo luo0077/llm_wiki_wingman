@@ -26,6 +26,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.5.0",
+    date: "2026-06-24",
+    highlights: {
+      en: [
+        "Added the new chat Agent flow with query understanding, local/wiki graph tools, external search tools, and visible tool progress.",
+        "Improved chat references with an in-chat preview panel, resizable preview width, source snippets, and persisted search toggles.",
+        "Improved Agent routing by using each project overview to decide when local wiki search should be preferred over external search.",
+        "Removed the Intel macOS release build from GitHub Actions.",
+      ],
+      zh: [
+        "新增聊天 Agent 流程，支持问题理解、本地 Wiki/图谱工具、外部搜索工具，以及可见的工具调用进度。",
+        "改进聊天引用体验：支持对话内引用预览、可调预览宽度、来源片段展示，以及搜索开关持久化。",
+        "改进 Agent 路由判断：使用每个项目的 overview 来判断何时优先搜索当前知识库而不是外部网页。",
+        "移除 GitHub Actions 中的 Intel Mac 发布构建。",
+      ],
+    },
+  },
+  {
     version: "0.4.26",
     date: "2026-06-23",
     highlights: {
