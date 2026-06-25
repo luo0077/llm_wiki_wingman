@@ -9,12 +9,15 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { useResearchStore } from "@/stores/research-store"
 import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
-import { readFile } from "@/commands/fs"
+import { readFile, writeFile } from "@/commands/fs"
+import { WikiEditor } from "@/components/editor/wiki-editor"
+import { FilePreview } from "@/components/editor/file-preview"
 import { buildWikiGraph, type GraphNode, type GraphEdge, type CommunityInfo } from "@/lib/wiki-graph"
 import { findSurprisingConnections, detectKnowledgeGaps, type SurprisingConnection, type KnowledgeGap } from "@/lib/graph-insights"
 import { queueResearch } from "@/lib/deep-research"
 import { optimizeResearchTopic } from "@/lib/optimize-research-topic"
-import { normalizePath } from "@/lib/path-utils"
+import { getFileName, normalizePath } from "@/lib/path-utils"
+import { getFileCategory } from "@/lib/file-types"
 import { applyGraphFilters, DEFAULT_GRAPH_FILTERS, hasActiveGraphFilters, type GraphFilterState } from "@/lib/graph-filters"
 import { applyGraphSearch } from "@/lib/graph-search"
 import { wikiTypeLabel } from "@/lib/wiki-page-types"
@@ -77,6 +80,11 @@ const GRAPH_SPACING_DEBOUNCE_MS = 180
 const WORKER_LAYOUT_NODE_THRESHOLD = 220
 
 type HoverState = { node: string; neighbors: Set<string> } | null
+type GraphPreview = {
+  path: string
+  title: string
+  content: string
+}
 
 function graphThemePalette(isDark: boolean): GraphThemePalette {
   return isDark
@@ -538,7 +546,6 @@ export function GraphView() {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
   const dataVersion = useWikiStore((s) => s.dataVersion)
-  const openFileInPreview = useWikiStore((s) => s.openFileInPreview)
   const isDarkMode = useResolvedDarkMode()
   const graphPalette = useMemo(() => graphThemePalette(isDarkMode), [isDarkMode])
 
@@ -564,6 +571,7 @@ export function GraphView() {
   const [nodeScale, setNodeScale] = useState(DEFAULT_NODE_SCALE)
   const [graphSpacingDraft, setGraphSpacingDraft] = useState(DEFAULT_GRAPH_SPACING)
   const [graphSpacing, setGraphSpacing] = useState(DEFAULT_GRAPH_SPACING)
+  const [graphPreview, setGraphPreview] = useState<GraphPreview | null>(null)
   const [filters, setFilters] = useState<GraphFilterState>(() => ({
     ...DEFAULT_GRAPH_FILTERS,
     hiddenTypes: new Set(),
@@ -647,12 +655,16 @@ export function GraphView() {
       if (!node) return
       try {
         const content = await readFile(node.path)
-        openFileInPreview(node.path, content)
+        setGraphPreview({
+          path: node.path,
+          title: node.label || getFileName(node.path),
+          content,
+        })
       } catch (err) {
         console.error("Failed to open wiki page:", err)
       }
     },
-    [nodes, openFileInPreview],
+    [nodes],
   )
 
   const handleNodeContextMenu = useCallback((nodeId: string, x: number, y: number) => {
@@ -752,10 +764,9 @@ export function GraphView() {
   // Sigma crashes with "could not find suitable program for node type circle"
   // when its canvas is resized by external layout changes.
 
-  // 1. Detect panel open/close (selectedFile, researchPanel, insights)
-  const selectedFileForLayout = useWikiStore((s) => s.selectedFile)
+  // 1. Detect panel open/close (local graph preview, researchPanel, insights)
   const researchPanelForLayout = useResearchStore((s) => s.panelOpen)
-  const layoutKey = `${!!selectedFileForLayout}-${researchPanelForLayout}-${showInsights}`
+  const layoutKey = `${!!graphPreview}-${researchPanelForLayout}-${showInsights}`
   const prevLayoutKey = useRef(layoutKey)
 
   useEffect(() => {
@@ -1465,6 +1476,13 @@ export function GraphView() {
             </div>
           </div>
         )}
+        {graphPreview && (
+          <GraphPreviewPanel
+            preview={graphPreview}
+            onClose={() => setGraphPreview(null)}
+            onContentChange={(content) => setGraphPreview((prev) => prev ? { ...prev, content } : prev)}
+          />
+        )}
       </div>
 
       {/* Research Topic Confirmation Dialog */}
@@ -1555,6 +1573,85 @@ export function GraphView() {
         </div>
       )}
 
+    </div>
+  )
+}
+
+function GraphPreviewPanel({
+  preview,
+  onClose,
+  onContentChange,
+}: {
+  preview: GraphPreview
+  onClose: () => void
+  onContentChange: (content: string) => void
+}) {
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSavedRef = useRef(preview.content)
+  const category = getFileCategory(preview.path)
+
+  useEffect(() => {
+    lastSavedRef.current = preview.content
+  }, [preview.path, preview.content])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
+  }, [])
+
+  const writeNow = useCallback((markdown: string) => {
+    writeFile(preview.path, markdown)
+      .then(() => {
+        lastSavedRef.current = markdown
+        onContentChange(markdown)
+      })
+      .catch((err) => console.error("Failed to save graph preview:", err))
+  }, [onContentChange, preview.path])
+
+  const handleSave = useCallback((markdown: string, options?: { immediate?: boolean }) => {
+    if (markdown === lastSavedRef.current) return
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    if (options?.immediate) {
+      onContentChange(markdown)
+      writeNow(markdown)
+      return
+    }
+    saveTimerRef.current = setTimeout(() => {
+      writeNow(markdown)
+    }, 1000)
+  }, [onContentChange, writeNow])
+
+  return (
+    <div className="flex w-[420px] min-w-[320px] max-w-[50vw] shrink-0 flex-col border-l bg-background">
+      <div className="flex items-center justify-between border-b px-3 py-1.5">
+        <span className="truncate text-xs text-muted-foreground" title={preview.path}>
+          {preview.title}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="min-w-0 flex-1 overflow-auto">
+        {category === "markdown" ? (
+          <WikiEditor
+            key={preview.path}
+            content={preview.content}
+            onSave={handleSave}
+            filePath={preview.path}
+          />
+        ) : (
+          <FilePreview
+            key={preview.path}
+            filePath={preview.path}
+            textContent={preview.content}
+          />
+        )}
+      </div>
     </div>
   )
 }

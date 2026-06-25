@@ -26,6 +26,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.5.2",
+    date: "2026-06-25",
+    highlights: {
+      en: [
+        "Fixed knowledge graph node previews so clicked pages open in the graph-side preview panel instead of switching to the Wiki page.",
+      ],
+      zh: [
+        "修复知识图谱节点预览：点击页面节点时会在图谱右侧预览栏打开，不再跳转到 Wiki 页面。",
+      ],
+    },
+  },
+  {
     version: "0.5.1",
     date: "2026-06-24",
     highlights: {
