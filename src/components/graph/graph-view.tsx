@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useState, useRef, type ChangeEvent } f
 import Graph from "graphology"
 import { SigmaContainer, useLoadGraph, useRegisterEvents, useSetSettings, useSigma } from "@react-sigma/core"
 import "@react-sigma/core/lib/style.css"
+import type { NodeHoverDrawingFunction } from "sigma/rendering"
 import type { SigmaNodeEventPayload } from "sigma/types"
 import forceAtlas2 from "graphology-layout-forceatlas2"
 import { Network, RefreshCw, ZoomIn, ZoomOut, Maximize, Layers, Tag, Lightbulb, AlertTriangle, Link2, X, Search, Loader2, Filter, RotateCcw, EyeOff } from "lucide-react"
@@ -67,6 +68,10 @@ type ColorMode = "type" | "community"
 type GraphThemePalette = {
   defaultEdge: string
   label: string
+  hoverLabelText: string
+  hoverLabelBackground: string
+  hoverLabelBorder: string
+  hoverLabelShadow: string
   mutedNodeMixTarget: string
   dimmedEdge: string
   activeEdge: string
@@ -90,7 +95,11 @@ function graphThemePalette(isDark: boolean): GraphThemePalette {
   return isDark
     ? {
         defaultEdge: "rgba(100,116,139,0.18)",
-        label: "#e2e8f0",
+        label: "#f8fafc",
+        hoverLabelText: "#f8fafc",
+        hoverLabelBackground: "rgba(15,23,42,0.94)",
+        hoverLabelBorder: "rgba(148,163,184,0.38)",
+        hoverLabelShadow: "rgba(2,6,23,0.55)",
         mutedNodeMixTarget: "#334155",
         dimmedEdge: "rgba(71,85,105,0.12)",
         activeEdge: "#38bdf8",
@@ -98,10 +107,84 @@ function graphThemePalette(isDark: boolean): GraphThemePalette {
     : {
         defaultEdge: "#cbd5e1",
         label: "#1e293b",
+        hoverLabelText: "#0f172a",
+        hoverLabelBackground: "rgba(255,255,255,0.97)",
+        hoverLabelBorder: "rgba(15,23,42,0.14)",
+        hoverLabelShadow: "rgba(15,23,42,0.18)",
         mutedNodeMixTarget: "#e2e8f0",
         dimmedEdge: "rgba(148,163,184,0.22)",
         activeEdge: "#1e293b",
       }
+}
+
+function drawRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const safeRadius = Math.min(radius, width / 2, height / 2)
+  context.beginPath()
+  context.moveTo(x + safeRadius, y)
+  context.lineTo(x + width - safeRadius, y)
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius)
+  context.lineTo(x + width, y + height - safeRadius)
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height)
+  context.lineTo(x + safeRadius, y + height)
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius)
+  context.lineTo(x, y + safeRadius)
+  context.quadraticCurveTo(x, y, x + safeRadius, y)
+  context.closePath()
+}
+
+function createGraphNodeHoverRenderer(palette: GraphThemePalette): NodeHoverDrawingFunction {
+  return (context, data, settings) => {
+    const label = typeof data.label === "string" ? data.label : ""
+    const labelSize = settings.labelSize
+    const font = settings.labelFont
+    const weight = settings.labelWeight
+    const nodeRadius = Math.max(data.size, labelSize / 2) + 3
+
+    context.save()
+    context.shadowOffsetX = 0
+    context.shadowOffsetY = 2
+    context.shadowBlur = 10
+    context.shadowColor = palette.hoverLabelShadow
+    context.fillStyle = palette.hoverLabelBackground
+    context.strokeStyle = palette.hoverLabelBorder
+    context.lineWidth = 1
+
+    context.beginPath()
+    context.arc(data.x, data.y, nodeRadius, 0, Math.PI * 2)
+    context.closePath()
+    context.fill()
+    context.stroke()
+
+    if (label) {
+      context.font = `${weight} ${labelSize}px ${font}`
+      const paddingX = 8
+      const paddingY = 4
+      const gap = 6
+      const textWidth = context.measureText(label).width
+      const boxWidth = Math.ceil(textWidth + paddingX * 2)
+      const boxHeight = Math.ceil(labelSize + paddingY * 2)
+      const boxX = data.x + nodeRadius + gap
+      const boxY = data.y - boxHeight / 2
+
+      drawRoundedRect(context, boxX, boxY, boxWidth, boxHeight, 5)
+      context.fill()
+      context.stroke()
+
+      context.shadowBlur = 0
+      context.shadowOffsetY = 0
+      context.fillStyle = palette.hoverLabelText
+      context.fillText(label, boxX + paddingX, data.y + labelSize / 3)
+    }
+
+    context.restore()
+  }
 }
 
 function useResolvedDarkMode(): boolean {
@@ -391,9 +474,11 @@ function GraphRenderSettings({
     setSettings({
       hideEdgesOnMove: true,
       hideLabelsOnMove: true,
+      labelColor: { color: palette.label },
       labelDensity: labelDensity(nodeCount),
       labelRenderedSizeThreshold: labelSizeThreshold(nodeCount),
       renderEdgeLabels: false,
+      defaultDrawNodeHover: createGraphNodeHoverRenderer(palette),
       nodeReducer: (node, attrs) => {
         const result = { ...attrs }
         const hasHover = !!hoverState
@@ -548,6 +633,7 @@ export function GraphView() {
   const dataVersion = useWikiStore((s) => s.dataVersion)
   const isDarkMode = useResolvedDarkMode()
   const graphPalette = useMemo(() => graphThemePalette(isDarkMode), [isDarkMode])
+  const drawNodeHover = useMemo(() => createGraphNodeHoverRenderer(graphPalette), [graphPalette])
 
   const [nodes, setNodes] = useState<GraphNode[]>([])
   const [edges, setEdges] = useState<GraphEdge[]>([])
@@ -1022,6 +1108,7 @@ export function GraphView() {
                     labelSize: 13,
                     labelWeight: "bold",
                     labelColor: { color: graphPalette.label },
+                    defaultDrawNodeHover: drawNodeHover,
                     stagePadding: 30,
                   }}
                 >
