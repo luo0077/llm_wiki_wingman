@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import {
   ChevronUp, ChevronDown, Loader2, CheckCircle2, AlertCircle,
   FileText, Users, Lightbulb, BookOpen, GitMerge, BarChart3, HelpCircle, Layout,
-  RotateCcw, X, Clock, TrendingUp, Target,
+  RotateCcw, X, Clock, TrendingUp, Target, Pause, Play,
 } from "lucide-react"
 import { useActivityStore, type ActivityItem } from "@/stores/activity-store"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -15,6 +15,8 @@ import {
   retryAllFailedTasks,
   cancelTask,
   cancelAllTasks,
+  pauseProcessing,
+  resumeProcessing,
   type IngestTask,
 } from "@/lib/ingest-queue"
 import {
@@ -132,6 +134,15 @@ export function ActivityPanel() {
     )) return
     cancelAllTasks()
   }, [project, queueSummary.pending, queueSummary.processing])
+
+  const handleTogglePause = useCallback(() => {
+    if (!project) return
+    if (queueSummary.paused) {
+      resumeProcessing()
+    } else {
+      pauseProcessing()
+    }
+  }, [project, queueSummary.paused])
 
   const handleFileSyncRescan = useCallback(() => {
     if (!project) return
@@ -253,10 +264,24 @@ export function ActivityPanel() {
           {hasQueue && (queueSummary.processing > 0 || queueSummary.pending > 0) && (
             <div className="px-3 py-1.5 border-b border-border/50">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1 gap-2">
-                <span>Ingest Queue</span>
+                <span>{queueSummary.paused ? "Ingest Queue (paused)" : "Ingest Queue"}</span>
                 <span className="flex-1 text-right">
                   {queueSummary.completed + queueSummary.failed}/{queueSummary.total} complete
                 </span>
+                {(queueSummary.pending > 0 || queueSummary.paused) && (
+                  <button
+                    onClick={handleTogglePause}
+                    className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent hover:text-foreground"
+                    title={
+                      queueSummary.paused
+                        ? "Resume processing queued tasks"
+                        : "Pause — let the current task finish, then stop before the next (no more LLM calls)"
+                    }
+                  >
+                    {queueSummary.paused ? <Play className="h-2.5 w-2.5" /> : <Pause className="h-2.5 w-2.5" />}
+                    {queueSummary.paused ? "Resume" : "Pause"}
+                  </button>
+                )}
                 {queueSummary.pending + queueSummary.processing >= 2 && (
                   <button
                     onClick={handleCancelAll}
