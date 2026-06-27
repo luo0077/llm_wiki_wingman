@@ -42,10 +42,11 @@ describe("MiniMax Provider", () => {
     expect(body.stream).toBe(true)
   })
 
-  it("includes max_tokens (required by Anthropic wire)", () => {
+  it("includes max_tokens derived from context budget (required by Anthropic wire)", () => {
     const cfg = getProviderConfig(makeConfig())
     const body = cfg.buildBody([]) as Record<string, unknown>
-    expect(body.max_tokens).toBe(4096)
+    // 204 800 chars × 15% reserve ÷ 3 chars-per-token = 10 240; capped at 16 384
+    expect(body.max_tokens).toBe(10240)
   })
 
   it("carries the model in the body", () => {
