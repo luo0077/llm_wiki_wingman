@@ -219,6 +219,8 @@
   "review": {
     "title": "待审阅",
     "clearResolved": "清除已解决",
+    "refresh": "刷新",
+    "refreshHint": "从磁盘重新加载审阅项",
     "allClear": "一切正常，无需审阅",
     "resolvedDivider": "— 已解决 —"
   },
@@ -555,6 +557,8 @@
         "endpointFilesNote": "?root=wiki|sources|all；?recursive=false；?maxFiles=N（≤10000）。",
         "endpointContentNote": "?path=wiki/index.md —— 仅文本文件，最大 2 MB。",
         "endpointReviewsNote": "?status=unresolved|resolved|all；?type=missing-page；?limit=N。默认返回未解决的 Review 项。",
+        "endpointPatchReviewNote": "更新单个 Review 项。JSON body：{ resolved?, action? }（resolved 默认为 true；传 false 可重新打开）。使用 Review 标签页的刷新按钮重新读取。",
+        "endpointBulkResolveNote": "批量解决 Review 项。JSON body：{ ids, action? }。返回 { resolved, notFound, count }。",
         "endpointSearchNote": "JSON body：{ query, topK?, includeContent?, queryEmbedding? }。配置嵌入后使用统一的关键词 + 向量检索。",
         "endpointGraphNote": "?q=…&nodeType=…&limit=N —— 基于 wiki/*.md 的双链图谱。",
         "endpointRescanNote": "使用你的资料文件夹监控配置触发后端重新扫描。",

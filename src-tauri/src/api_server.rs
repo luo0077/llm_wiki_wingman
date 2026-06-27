@@ -240,7 +240,7 @@ fn handle_request(
     if !is_authorized(app, query, headers) {
         return err(401, "Unauthorized");
     }
-    if !matches!(method, &Method::Get | &Method::Post) {
+    if !matches!(method, &Method::Get | &Method::Post | &Method::Patch) {
         return err(405, "Method not allowed");
     }
 
@@ -259,6 +259,12 @@ fn handle_request(
         }
         (&Method::Get, ["projects", project_id, "reviews"]) => {
             handle_reviews(app, project_id, query)
+        }
+        (&Method::Post, ["projects", project_id, "reviews", "resolve"]) => {
+            handle_bulk_resolve_reviews(app, project_id, body)
+        }
+        (&Method::Patch, ["projects", project_id, "reviews", review_id]) => {
+            handle_patch_review(app, project_id, review_id, body)
         }
         (&Method::Post, ["projects", project_id, "search"]) => handle_search(app, project_id, body),
         (&Method::Get, ["projects", project_id, "graph"]) => handle_graph(app, project_id, query),
@@ -334,7 +340,7 @@ fn respond_json(request: tiny_http::Request, status: u16, body: Value) {
 fn cors_headers() -> Vec<Header> {
     vec![
         Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
-        Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, OPTIONS").unwrap(),
+        Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS").unwrap(),
         Header::from_bytes(
             "Access-Control-Allow-Headers",
             "Content-Type, Authorization, X-LLM-Wiki-Token",
@@ -1144,6 +1150,206 @@ fn handle_reviews(app: &AppHandle, project_id: &str, query: &str) -> ApiResponse
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct PatchReviewRequest {
+    /// Target resolved state. Defaults to `true` (the common case:
+    /// resolve). Pass `false` to reopen a resolved item.
+    resolved: Option<bool>,
+    /// Optional human-readable action label stored on the item
+    /// (e.g. "Skip", "Created page"). Mark-only — the API never
+    /// replicates the WebView's side effects (page creation, etc).
+    action: Option<String>,
+}
+
+/// `PATCH /projects/{id}/reviews/{reviewId}` — partial update of a
+/// single review item's resolved state. Body `{ resolved?, action? }`;
+/// an empty body resolves the item (resolved defaults to true).
+fn handle_patch_review(
+    app: &AppHandle,
+    project_id: &str,
+    review_id: &str,
+    body: &str,
+) -> ApiResponse {
+    let project = match resolve_project(app, project_id) {
+        Ok(project) => project,
+        Err(e) => return err(404, e),
+    };
+    let req = if body.trim().is_empty() {
+        PatchReviewRequest {
+            resolved: None,
+            action: None,
+        }
+    } else {
+        match serde_json::from_str::<PatchReviewRequest>(body) {
+            Ok(req) => req,
+            Err(e) => return err(400, format!("Invalid request body: {e}")),
+        }
+    };
+    let resolved = req.resolved.unwrap_or(true);
+    match patch_review_item(&project.path, review_id, resolved, req.action.as_deref()) {
+        Ok(true) => ok(json!({
+            "ok": true,
+            "projectId": project.id,
+            "reviewId": review_id,
+            "resolved": resolved,
+        })),
+        Ok(false) => err(404, format!("Review item '{review_id}' not found")),
+        Err(e) => err(500, e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkResolveRequest {
+    /// Review item ids to resolve. Required, non-empty.
+    ids: Vec<String>,
+    /// Optional label applied to every resolved item.
+    action: Option<String>,
+}
+
+/// `POST /projects/{id}/reviews/resolve` — bulk-resolve many review
+/// items in one request. Body `{ ids, action? }`. Partial success is
+/// normal, so this returns 200 with `{ resolved, notFound, count }`
+/// rather than 404 — 404 is reserved for the single-item PATCH where
+/// one unknown id is the entire request.
+fn handle_bulk_resolve_reviews(app: &AppHandle, project_id: &str, body: &str) -> ApiResponse {
+    let project = match resolve_project(app, project_id) {
+        Ok(project) => project,
+        Err(e) => return err(404, e),
+    };
+    let req = match serde_json::from_str::<BulkResolveRequest>(body) {
+        Ok(req) => req,
+        Err(e) => return err(400, format!("Invalid request body: {e}")),
+    };
+    if req.ids.is_empty() {
+        return err(400, "ids must be a non-empty array".to_string());
+    }
+    match resolve_review_items(&project.path, &req.ids, req.action.as_deref()) {
+        Ok((resolved, not_found)) => ok(json!({
+            "ok": true,
+            "projectId": project.id,
+            "resolved": resolved,
+            "notFound": not_found,
+            "count": resolved.len(),
+        })),
+        Err(e) => err(500, e),
+    }
+}
+
+/// Set one review item's resolved state in `.llm-wiki/review.json`.
+///
+/// Operates on the RAW parsed array (not `load_review_items`, which
+/// sanitizes — reusing it would strip fields like `internalSecret` and
+/// silently corrupt the file on write-back). Sets `resolved` and, when
+/// provided, `resolvedAction`. Returns Ok(false) if no item with the
+/// given id exists (caller maps to 404).
+fn patch_review_item(
+    project_path: &str,
+    review_id: &str,
+    resolved: bool,
+    action: Option<&str>,
+) -> Result<bool, String> {
+    let path = Path::new(project_path).join(".llm-wiki/review.json");
+    let mut parsed = match read_raw_review_array(&path)? {
+        Some(parsed) => parsed,
+        None => return Ok(false),
+    };
+    let items = parsed
+        .as_array_mut()
+        .ok_or_else(|| "Invalid review state JSON: expected an array".to_string())?;
+
+    let mut found = false;
+    for item in items.iter_mut() {
+        if item.get("id").and_then(Value::as_str) != Some(review_id) {
+            continue;
+        }
+        apply_resolution(item, resolved, action);
+        found = true;
+        break;
+    }
+
+    if !found {
+        return Ok(false);
+    }
+    write_raw_review_array(&path, &parsed)?;
+    Ok(true)
+}
+
+/// Bulk version of `patch_review_item`: reads `review.json` ONCE,
+/// resolves every matching id in the raw array, writes ONCE. Looping
+/// the single-item helper would be N read-parse-write cycles with a
+/// race window per write. Returns `(resolved_ids, not_found_ids)`,
+/// both in the caller's input order.
+fn resolve_review_items(
+    project_path: &str,
+    ids: &[String],
+    action: Option<&str>,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let path = Path::new(project_path).join(".llm-wiki/review.json");
+    let mut parsed = match read_raw_review_array(&path)? {
+        Some(parsed) => parsed,
+        // No review file → nothing exists, so every id is "not found".
+        None => return Ok((Vec::new(), ids.to_vec())),
+    };
+    let items = parsed
+        .as_array_mut()
+        .ok_or_else(|| "Invalid review state JSON: expected an array".to_string())?;
+
+    let requested: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for item in items.iter_mut() {
+        let id = match item.get("id").and_then(Value::as_str) {
+            Some(id) if requested.contains(id) => id.to_string(),
+            _ => continue,
+        };
+        apply_resolution(item, true, action);
+        found.insert(id);
+    }
+
+    if !found.is_empty() {
+        write_raw_review_array(&path, &parsed)?;
+    }
+
+    // Preserve the caller's input order; dedupe is implicit via `found`.
+    let resolved: Vec<String> = ids.iter().filter(|id| found.contains(*id)).cloned().collect();
+    let not_found: Vec<String> = ids
+        .iter()
+        .filter(|id| !found.contains(*id))
+        .cloned()
+        .collect();
+    Ok((resolved, not_found))
+}
+
+/// Set `resolved` / `resolvedAction` on a raw review item value.
+fn apply_resolution(item: &mut Value, resolved: bool, action: Option<&str>) {
+    if let Some(obj) = item.as_object_mut() {
+        obj.insert("resolved".to_string(), Value::Bool(resolved));
+        if let Some(action) = action {
+            obj.insert("resolvedAction".to_string(), Value::String(action.to_string()));
+        }
+    }
+}
+
+/// Read `.llm-wiki/review.json` as a raw JSON value. Returns Ok(None)
+/// when the file doesn't exist (callers treat that as "no items").
+fn read_raw_review_array(path: &Path) -> Result<Option<Value>, String> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(format!("Failed to read review state: {err}")),
+    };
+    let parsed: Value =
+        serde_json::from_str(&raw).map_err(|err| format!("Invalid review state JSON: {err}"))?;
+    Ok(Some(parsed))
+}
+
+fn write_raw_review_array(path: &Path, parsed: &Value) -> Result<(), String> {
+    let serialized = serde_json::to_string_pretty(parsed)
+        .map_err(|err| format!("Failed to serialize review state: {err}"))?;
+    fs::write(path, serialized).map_err(|err| format!("Failed to write review state: {err}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SearchRequest {
     query: String,
     top_k: Option<usize>,
@@ -1421,11 +1627,18 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_project_dir() -> PathBuf {
+        // Per-process atomic sequence appended to the timestamp so two
+        // tests calling this concurrently can't collide on the same dir
+        // (nanos alone are not unique enough under parallel `cargo test`,
+        // which would let one test's remove_dir_all delete another's files).
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("llm-wiki-api-test-{id}"));
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("llm-wiki-api-test-{id}-{seq}"));
         fs::create_dir_all(path.join("wiki")).unwrap();
         path
     }
@@ -1542,6 +1755,146 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["r1", "r2"]
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn write_reviews(root: &Path, value: Value) {
+        let state_dir = root.join(".llm-wiki");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::write(state_dir.join("review.json"), value.to_string()).unwrap();
+    }
+
+    fn read_reviews(root: &Path) -> Value {
+        let raw = fs::read_to_string(root.join(".llm-wiki/review.json")).unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    #[test]
+    fn patch_review_item_marks_resolved_and_preserves_unsanitized_fields() {
+        let root = test_project_dir();
+        write_reviews(
+            &root,
+            json!([
+                {
+                    "id": "r1",
+                    "type": "missing-page",
+                    "resolved": false,
+                    "createdAt": 1,
+                    "internalSecret": "keep-me"
+                },
+                { "id": "r2", "type": "duplicate", "resolved": false, "createdAt": 2 }
+            ]),
+        );
+
+        let found = patch_review_item(root.to_str().unwrap(), "r1", true, Some("Skip")).unwrap();
+        assert!(found);
+
+        // Re-read the RAW file: r1 must be resolved with the action label,
+        // its non-sanitized `internalSecret` preserved (the write path must
+        // not go through the sanitizing reader), and r2 left untouched.
+        let parsed = read_reviews(&root);
+        let items = parsed.as_array().unwrap();
+        let r1 = items
+            .iter()
+            .find(|i| i.get("id").and_then(Value::as_str) == Some("r1"))
+            .unwrap();
+        assert_eq!(r1.get("resolved").and_then(Value::as_bool), Some(true));
+        assert_eq!(r1.get("resolvedAction").and_then(Value::as_str), Some("Skip"));
+        assert_eq!(
+            r1.get("internalSecret").and_then(Value::as_str),
+            Some("keep-me")
+        );
+        let r2 = items
+            .iter()
+            .find(|i| i.get("id").and_then(Value::as_str) == Some("r2"))
+            .unwrap();
+        assert_eq!(r2.get("resolved").and_then(Value::as_bool), Some(false));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_review_item_can_reopen_with_resolved_false() {
+        let root = test_project_dir();
+        write_reviews(
+            &root,
+            json!([{ "id": "r1", "resolved": true, "resolvedAction": "Skip" }]),
+        );
+
+        let found = patch_review_item(root.to_str().unwrap(), "r1", false, None).unwrap();
+        assert!(found);
+
+        let parsed = read_reviews(&root);
+        let r1 = &parsed.as_array().unwrap()[0];
+        assert_eq!(r1.get("resolved").and_then(Value::as_bool), Some(false));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_review_item_returns_false_for_unknown_id() {
+        let root = test_project_dir();
+        write_reviews(&root, json!([{ "id": "r1", "resolved": false }]));
+
+        let found = patch_review_item(root.to_str().unwrap(), "nope", true, None).unwrap();
+        assert!(!found);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_review_item_missing_file_returns_false() {
+        let root = test_project_dir();
+        let found = patch_review_item(root.to_str().unwrap(), "r1", true, None).unwrap();
+        assert!(!found);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_review_items_bulk_resolves_matching_and_reports_not_found() {
+        let root = test_project_dir();
+        write_reviews(
+            &root,
+            json!([
+                { "id": "r1", "resolved": false, "internalSecret": "a" },
+                { "id": "r2", "resolved": false },
+                { "id": "r3", "resolved": false }
+            ]),
+        );
+
+        let ids = vec!["r1".to_string(), "r3".to_string(), "missing".to_string()];
+        let (resolved, not_found) =
+            resolve_review_items(root.to_str().unwrap(), &ids, Some("Bulk")).unwrap();
+
+        // Input order preserved; missing id reported, not 404'd.
+        assert_eq!(resolved, vec!["r1".to_string(), "r3".to_string()]);
+        assert_eq!(not_found, vec!["missing".to_string()]);
+
+        let parsed = read_reviews(&root);
+        let items = parsed.as_array().unwrap();
+        let by_id = |id: &str| {
+            items
+                .iter()
+                .find(|i| i.get("id").and_then(Value::as_str) == Some(id))
+                .unwrap()
+        };
+        assert_eq!(by_id("r1").get("resolved").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            by_id("r1").get("resolvedAction").and_then(Value::as_str),
+            Some("Bulk")
+        );
+        // Unsanitized field survives the bulk write-back too.
+        assert_eq!(by_id("r1").get("internalSecret").and_then(Value::as_str), Some("a"));
+        assert_eq!(by_id("r3").get("resolved").and_then(Value::as_bool), Some(true));
+        // r2 was not in the request — untouched.
+        assert_eq!(by_id("r2").get("resolved").and_then(Value::as_bool), Some(false));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_review_items_missing_file_reports_all_not_found() {
+        let root = test_project_dir();
+        let ids = vec!["r1".to_string(), "r2".to_string()];
+        let (resolved, not_found) = resolve_review_items(root.to_str().unwrap(), &ids, None).unwrap();
+        assert!(resolved.is_empty());
+        assert_eq!(not_found, ids);
         let _ = fs::remove_dir_all(root);
     }
 
