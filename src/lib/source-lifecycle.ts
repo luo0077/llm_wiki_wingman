@@ -205,7 +205,11 @@ export async function importSourceFolder(
   const cfg = normalizeSourceWatchConfig(sourceWatchConfig)
   const maxBytes = cfg.maxFileSizeMb * 1024 * 1024
   const allowedFiles: string[] = []
-  const sourceFiles = flattenFiles(await listDirectory(selectedFolder))
+  // include hidden: a user importing a folder into raw/sources may
+  // legitimately want its dotfolders (.claude, .codex). Non-source
+  // noise is still filtered downstream by the source-watch allowlist
+  // and max-size check below.
+  const sourceFiles = flattenFiles(await listDirectory(selectedFolder, true))
 
   for (const file of sourceFiles) {
     const relativeSourcePath = getRelativePath(file.path, sourceRoot)

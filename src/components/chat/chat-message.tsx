@@ -41,7 +41,7 @@ export function useSourceFiles() {
   useEffect(() => {
     if (!project) return
     const pp = normalizePath(project.path)
-    listDirectory(`${pp}/raw/sources`)
+    listDirectory(`${pp}/raw/sources`, true)
       .then((tree) => {
         cachedSourceFiles = flattenNames(tree)
       })
