@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { useWikiStore, type ProviderOverride, type ReasoningConfig, type ReasoningMode } from "@/stores/wiki-store"
+import { useWikiStore, type LlmConfig, type ProviderOverride, type ReasoningConfig, type ReasoningMode } from "@/stores/wiki-store"
 import { LLM_PRESETS, type LlmPreset } from "../llm-presets"
 import { ContextSizeSelector } from "../context-size-selector"
 import { resolveConfig } from "../preset-resolver"
@@ -41,6 +41,16 @@ export function LlmProviderSection() {
         setLlmConfig(resolved)
         await saveLlmConfig(resolved)
       }
+    } else {
+      // All presets disabled: write llmConfig into a state where hasUsableLlm()
+      // returns false so ingest, dedup, and sweep queues pause immediately.
+      // Clearing provider to "openai" (a keyed provider) + empty apiKey covers
+      // the case where the previous provider was a keyless local CLI.
+      // resolveConfig() on re-enable reads from providerConfigs[], not llmConfig,
+      // so the cleared values here do not affect the user's saved settings.
+      const cleared: LlmConfig = { ...llmConfig, provider: "openai", apiKey: "" }
+      setLlmConfig(cleared)
+      await saveLlmConfig(cleared)
     }
   }
 
