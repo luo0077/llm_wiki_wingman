@@ -1,5 +1,5 @@
 import { writeFile, readFile, createDirectory } from "@/commands/fs"
-import type { ReviewItem } from "@/stores/review-store"
+import { normalizeReviewItems, type ReviewItem } from "@/stores/review-store"
 import type { LintItem } from "@/stores/lint-store"
 import type { DisplayMessage, Conversation } from "@/stores/chat-store"
 import type { ChatAgentMode } from "@/lib/chat-agent"
@@ -20,7 +20,7 @@ export async function loadReviewItems(projectPath: string): Promise<ReviewItem[]
   const pp = normalizePath(projectPath)
   try {
     const content = await readFile(`${pp}/.llm-wiki/review.json`)
-    return JSON.parse(content) as ReviewItem[]
+    return normalizeReviewItems(JSON.parse(content) as ReviewItem[])
   } catch {
     return []
   }

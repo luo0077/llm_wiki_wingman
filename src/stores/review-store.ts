@@ -63,22 +63,43 @@ function unionField(a?: string[], b?: string[]): string[] | undefined {
   return merged.length > 0 ? merged : undefined
 }
 
+function mergeOptions(a: ReviewOption[], b: ReviewOption[]): ReviewOption[] {
+  const byAction = new Map<string, ReviewOption>()
+  for (const option of [...a, ...b]) {
+    byAction.set(option.action, option)
+  }
+  return [...byAction.values()]
+}
+
 /**
  * Collapse two items that resolved to the same stable id. resolved
  * wins (if either was resolved, the survivor is), union the array
  * fields, keep the earliest createdAt, prefer a non-empty description.
  */
 function mergeReviewItems(a: ReviewItem, b: ReviewItem): ReviewItem {
+  const resolved = a.resolved || b.resolved
+  const resolvedAction = resolved ? a.resolvedAction ?? b.resolvedAction : undefined
   return {
     ...a, // a.id is kept; both share it by construction
-    resolved: a.resolved || b.resolved,
-    resolvedAction: a.resolved ? a.resolvedAction : b.resolved ? b.resolvedAction : a.resolvedAction,
+    resolved,
+    resolvedAction,
     description: a.description || b.description,
     sourcePath: a.sourcePath ?? b.sourcePath,
     affectedPages: unionField(a.affectedPages, b.affectedPages),
     searchQueries: unionField(a.searchQueries, b.searchQueries),
+    options: mergeOptions(a.options, b.options),
     createdAt: Math.min(a.createdAt, b.createdAt),
   }
+}
+
+export function normalizeReviewItems(items: ReviewItem[]): ReviewItem[] {
+  const byId = new Map<string, ReviewItem>()
+  for (const raw of items) {
+    const remapped: ReviewItem = { ...raw, id: reviewIdFor(raw) }
+    const existing = byId.get(remapped.id)
+    byId.set(remapped.id, existing ? mergeReviewItems(existing, remapped) : remapped)
+  }
+  return [...byId.values()]
 }
 
 export const useReviewStore = create<ReviewState>((set) => ({
@@ -139,13 +160,7 @@ export const useReviewStore = create<ReviewState>((set) => ({
     // resolved review keeps its resolution across the id-scheme change.
     // Computing the id from content (not the old id) makes this
     // idempotent — no migration-version flag needed.
-    const byId = new Map<string, ReviewItem>()
-    for (const raw of items) {
-      const remapped: ReviewItem = { ...raw, id: reviewIdFor(raw) }
-      const existing = byId.get(remapped.id)
-      byId.set(remapped.id, existing ? mergeReviewItems(existing, remapped) : remapped)
-    }
-    set({ items: [...byId.values()] })
+    set({ items: normalizeReviewItems(items) })
   },
 
   resolveItem: (id, action) =>
