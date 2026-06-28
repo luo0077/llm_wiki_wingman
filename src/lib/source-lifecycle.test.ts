@@ -181,4 +181,54 @@ describe("source-lifecycle path helpers", () => {
       },
     ])
   })
+
+  it("naturally orders imported folder files before enqueueing ingest tasks", async () => {
+    mocks.listDirectory.mockResolvedValue([
+      { name: "10.md", path: "/external/imported/10.md", is_dir: false },
+      { name: "2.md", path: "/external/imported/2.md", is_dir: false },
+      { name: "1.md", path: "/external/imported/1.md", is_dir: false },
+    ])
+
+    const copied = await importSourceFolder(
+      { id: "p1", name: "Project", path: "/project" },
+      "/external/imported",
+      {
+        provider: "openai",
+        endpoint: "https://api.example.com/v1",
+        apiKey: "key",
+        model: "model",
+        customModel: "",
+        reasoning: { enabled: false, effort: "low" },
+      } as never,
+      {
+        enabled: true,
+        autoIngest: true,
+        includeExtensions: ["md"],
+        excludeExtensions: [],
+        excludeDirs: [],
+        excludeGlobs: [],
+        maxFileSizeMb: 100,
+      },
+    )
+
+    expect(copied).toEqual([
+      "/project/raw/sources/imported/1.md",
+      "/project/raw/sources/imported/2.md",
+      "/project/raw/sources/imported/10.md",
+    ])
+    expect(mocks.enqueueBatch).toHaveBeenCalledWith("p1", [
+      {
+        sourcePath: "/project/raw/sources/imported/1.md",
+        folderContext: "imported",
+      },
+      {
+        sourcePath: "/project/raw/sources/imported/2.md",
+        folderContext: "imported",
+      },
+      {
+        sourcePath: "/project/raw/sources/imported/10.md",
+        folderContext: "imported",
+      },
+    ])
+  })
 })

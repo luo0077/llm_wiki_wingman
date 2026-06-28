@@ -34,6 +34,7 @@ import {
 } from "@/lib/wiki-cleanup"
 import { collectAllFilesIncludingDot } from "@/lib/sources-tree-delete"
 import { isPathAllowedBySourceWatch, normalizeSourceWatchConfig } from "@/lib/source-watch-config"
+import { naturalCompare } from "@/lib/natural-sort"
 import type { SourceWatchConfig } from "@/stores/wiki-store"
 
 export const INGESTABLE_SOURCE_EXTENSIONS = new Set([
@@ -231,14 +232,18 @@ export async function importSourceFolder(
     preprocessFile(destPath).catch(() => {})
   }
 
+  const naturallyOrderedFiles = [...allowedFiles].sort((a, b) =>
+    naturalCompare(getRelativePath(a, destDir), getRelativePath(b, destDir)),
+  )
+
   if (hasUsableLlm(llmConfig)) {
-    await enqueueSourceIngest(project, allowedFiles, llmConfig, {
+    await enqueueSourceIngest(project, naturallyOrderedFiles, llmConfig, {
       sourceRoot: destDir,
       rootContext: folderName,
     })
   }
 
-  return allowedFiles
+  return naturallyOrderedFiles
 }
 
 export async function deleteSourceFile(

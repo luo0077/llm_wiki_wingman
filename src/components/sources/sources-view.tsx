@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next"
 import { normalizePath } from "@/lib/path-utils"
 import { decideDeleteClick } from "@/lib/sources-tree-delete"
 import { rescanProjectFileSync } from "@/lib/project-file-sync"
+import { naturalCompare } from "@/lib/natural-sort"
 import {
   deleteSourceFile,
   deleteSourceFolder,
@@ -397,7 +398,7 @@ function sortSourceNodes(nodes: readonly FileNode[]): FileNode[] {
   return [...nodes].sort((a, b) => {
     if (a.is_dir && !b.is_dir) return -1
     if (!a.is_dir && b.is_dir) return 1
-    return a.name.localeCompare(b.name)
+    return naturalCompare(a.name, b.name)
   })
 }
 
