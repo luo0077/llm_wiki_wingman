@@ -135,7 +135,7 @@ describe("autoIngest source summary paths", () => {
     await writeFileRaw(`${tmp.path}/purpose.md`, "# Purpose\n\nTrack project config files.\n")
     await writeFileRaw(
       `${tmp.path}/schema.md`,
-      "# Schema\n\nEach source needs its own source summary page.\n",
+      "# Schema\n\nEach source needs its own source summary page.\n\n## Page Types\n| goal | wiki/goals/ | Outcomes |\n| habit | wiki/habits/ | Behaviours |",
     )
     await writeFileRaw(`${tmp.path}/wiki/index.md`, "# Index\n")
     await writeFileRaw(`${tmp.path}/wiki/overview.md`, "# Overview\n")
@@ -335,6 +335,10 @@ describe("autoIngest source summary paths", () => {
       String(messages?.[0]?.content ?? "").startsWith("You are analyzing a long source document"),
     )
     expect(chunkCalls.length).toBeGreaterThan(1)
+    const chunkSystemPrompt = String(chunkCalls[0][1]?.[0]?.content ?? "")
+    expect(chunkSystemPrompt).toContain("wiki/goals/")
+    expect(chunkSystemPrompt).toContain("Schema-Typed Candidates")
+    expect(chunkSystemPrompt).toContain("never invent goals")
     expect(String(chunkCalls[0][1]?.[1]?.content ?? "")).toContain("## MAIN CHUNK TO ANALYZE")
     expect(String(chunkCalls[1][1]?.[1]?.content ?? "")).toContain(
       "Digest after chunk 1: stable context 1.",
