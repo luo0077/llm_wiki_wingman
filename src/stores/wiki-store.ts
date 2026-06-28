@@ -38,7 +38,14 @@ interface LlmConfig {
   codexCliTimeoutMinutes?: number
 }
 
-export type SearchProvider = "tavily" | "serpapi" | "searxng" | "ollama" | "firecrawl" | "none"
+export type SearchProvider =
+  | "tavily"
+  | "serpapi"
+  | "searxng"
+  | "ollama"
+  | "brave"
+  | "firecrawl"
+  | "none"
 export type DeepResearchSource = "web" | "anytxt" | "both"
 export type SerpApiEngine =
   | "google"
