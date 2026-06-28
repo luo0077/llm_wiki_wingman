@@ -13,6 +13,7 @@ use tauri::{AppHandle, Manager};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use walkdir::WalkDir;
 
+use crate::cors::{local_cors_headers, request_origin};
 use crate::{clip_server, commands};
 
 const PORT: u16 = 19828;
@@ -78,12 +79,13 @@ pub fn start_api_server(app: AppHandle) {
         for request in server.incoming_requests() {
             let method = request.method().clone();
             let url = request.url().to_string();
+            let origin = request_origin(&request);
             if should_rate_limit(&method, &url) && !allow_request() {
-                respond_error(request, 429, "Too many requests");
+                respond_error(request, 429, "Too many requests", origin.as_deref());
                 continue;
             }
             let Some(slot) = try_acquire_request_slot() else {
-                respond_error(request, 503, "API server is busy");
+                respond_error(request, 503, "API server is busy", origin.as_deref());
                 continue;
             };
             let app = app.clone();
@@ -150,8 +152,9 @@ fn try_acquire_request_slot() -> Option<RequestSlot> {
 fn process_request(app: AppHandle, mut request: tiny_http::Request) {
     let method = request.method().clone();
     let url = request.url().to_string();
+    let origin = request_origin(&request);
     if method == Method::Options {
-        respond_options(request);
+        respond_options(request, origin.as_deref());
         return;
     }
 
@@ -169,7 +172,7 @@ fn process_request(app: AppHandle, mut request: tiny_http::Request) {
     let body = match read_body(&mut request) {
         Ok(body) => body,
         Err(err) => {
-            respond_error(request, 400, &err);
+            respond_error(request, 400, &err, origin.as_deref());
             return;
         }
     };
@@ -181,7 +184,7 @@ fn process_request(app: AppHandle, mut request: tiny_http::Request) {
         eprintln!("[API Server] request panicked: {payload:?}");
         err(500, "Internal API server error")
     });
-    respond_json(request, response.status, response.body);
+    respond_json(request, response.status, response.body, origin.as_deref());
 }
 
 struct ApiResponse {
@@ -316,38 +319,34 @@ fn read_body(request: &mut tiny_http::Request) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "Request body must be UTF-8".to_string())
 }
 
-fn respond_error(request: tiny_http::Request, status: u16, message: &str) {
-    respond_json(request, status, json!({ "ok": false, "error": message }));
+fn respond_error(request: tiny_http::Request, status: u16, message: &str, origin: Option<&str>) {
+    respond_json(
+        request,
+        status,
+        json!({ "ok": false, "error": message }),
+        origin,
+    );
 }
 
-fn respond_options(request: tiny_http::Request) {
+fn respond_options(request: tiny_http::Request, origin: Option<&str>) {
     let mut response = Response::empty(StatusCode(204));
-    for header in cors_headers() {
+    for header in cors_headers(origin) {
         response.add_header(header);
     }
     response.add_header(Header::from_bytes("Access-Control-Max-Age", "600").unwrap());
     let _ = request.respond(response);
 }
 
-fn respond_json(request: tiny_http::Request, status: u16, body: Value) {
+fn respond_json(request: tiny_http::Request, status: u16, body: Value, origin: Option<&str>) {
     let mut response = Response::from_string(body.to_string()).with_status_code(StatusCode(status));
-    for header in cors_headers() {
+    for header in cors_headers(origin) {
         response.add_header(header);
     }
     let _ = request.respond(response);
 }
 
-fn cors_headers() -> Vec<Header> {
-    vec![
-        Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
-        Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS").unwrap(),
-        Header::from_bytes(
-            "Access-Control-Allow-Headers",
-            "Content-Type, Authorization, X-LLM-Wiki-Token",
-        )
-        .unwrap(),
-        Header::from_bytes("Content-Type", "application/json").unwrap(),
-    ]
+fn cors_headers(origin: Option<&str>) -> Vec<Header> {
+    local_cors_headers(origin, "Content-Type, Authorization, X-LLM-Wiki-Token")
 }
 
 fn split_url(url: &str) -> (String, &str) {
