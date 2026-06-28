@@ -291,6 +291,201 @@ describe("webSearch", () => {
       .resolves.toEqual([])
   })
 
+  it("normalizes object-shaped Firecrawl data results", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        results: [
+          {
+            title: "Object data result",
+            url: "https://example.com/object-data",
+            description: "Nested data shape",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([
+        {
+          title: "Object data result",
+          url: "https://example.com/object-data",
+          snippet: "Nested data shape",
+          source: "example.com",
+        },
+      ])
+  })
+
+  it("normalizes categorized Firecrawl web results", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        web: [
+          {
+            title: "Categorized web result",
+            url: "https://example.com/firecrawl-web",
+            description: "Web category shape",
+          },
+        ],
+        news: [
+          {
+            title: "News result",
+            url: "https://example.com/news",
+            description: "Ignored category",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([
+        {
+          title: "Categorized web result",
+          url: "https://example.com/firecrawl-web",
+          snippet: "Web category shape",
+          source: "example.com",
+        },
+      ])
+  })
+
+  it("normalizes object-shaped top-level Firecrawl results", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      results: {
+        web: [
+          {
+            title: "Top-level object result",
+            url: "https://example.com/top-results",
+            description: "Nested under results.web",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([
+        {
+          title: "Top-level object result",
+          url: "https://example.com/top-results",
+          snippet: "Nested under results.web",
+          source: "example.com",
+        },
+      ])
+  })
+
+  it("uses Firecrawl web results before fallback categories", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        web: [
+          {
+            title: "Preferred web",
+            url: "https://example.com/web",
+            description: "Use me",
+          },
+        ],
+        results: [
+          {
+            title: "Fallback result",
+            url: "https://example.com/fallback",
+            description: "Do not use me",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([
+        {
+          title: "Preferred web",
+          url: "https://example.com/web",
+          snippet: "Use me",
+          source: "example.com",
+        },
+      ])
+  })
+
+  it("keeps an empty Firecrawl web category empty instead of falling back", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        web: [],
+        results: [
+          {
+            title: "Fallback result",
+            url: "https://example.com/fallback",
+            description: "Should stay hidden",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([])
+  })
+
+  it("normalizes Firecrawl items fallback results", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        items: [
+          {
+            title: "Items fallback",
+            url: "https://example.com/items",
+            description: "Fallback item",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([
+        {
+          title: "Items fallback",
+          url: "https://example.com/items",
+          snippet: "Fallback item",
+          source: "example.com",
+        },
+      ])
+  })
+
+  it("treats unsupported Firecrawl result shapes as empty results", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, data: { unexpected: true } }))
+    fetchMock.mockResolvedValueOnce(jsonResponse({ success: true, data: "unexpected" }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([])
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([])
+  })
+
+  it("filters non-object Firecrawl result entries", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        web: [
+          null,
+          "unexpected",
+          {
+            title: "Valid entry",
+            url: "https://example.com/valid",
+            description: "Keep this",
+          },
+        ],
+      },
+    }))
+
+    await expect(webSearch("llm_wiki", { provider: "firecrawl", apiKey: "" }, 5))
+      .resolves.toEqual([
+        {
+          title: "Valid entry",
+          url: "https://example.com/valid",
+          snippet: "Keep this",
+          source: "example.com",
+        },
+      ])
+  })
+
   it("filters missing URLs in Firecrawl data results", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       success: true,

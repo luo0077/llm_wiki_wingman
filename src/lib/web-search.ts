@@ -307,8 +307,8 @@ async function tavilySearch(
 interface FirecrawlSearchResponse {
   success?: boolean
   error?: string
-  data?: unknown[]
-  results?: unknown[]
+  data?: unknown
+  results?: unknown
 }
 
 async function firecrawlSearch(
@@ -370,14 +370,42 @@ function friendlyFirecrawlError(error?: string): string | null {
 }
 
 function normalizeFirecrawlResults(data: FirecrawlSearchResponse, maxResults: number): WebSearchResult[] {
-  const rawResults = data.data ?? data.results ?? []
+  const rawResults = extractFirecrawlResultArray(data)
   return rawResults
     .slice(0, maxResults)
     .map((item) => normalizeFirecrawlResult(item))
     .filter((item) => item.url.length > 0)
 }
 
+function extractFirecrawlResultArray(data: FirecrawlSearchResponse): unknown[] {
+  if (Array.isArray(data.data)) return data.data
+  if (Array.isArray(data.results)) return data.results
+
+  return extractFirecrawlNestedResultArray(data.data)
+    ?? extractFirecrawlNestedResultArray(data.results)
+    ?? []
+}
+
+function extractFirecrawlNestedResultArray(value: unknown): unknown[] | null {
+  if (!value || typeof value !== "object") return null
+  const nested = value as Record<string, unknown>
+
+  // Firecrawl v2 may return categorized results as data.web/news/images.
+  // LLM Wiki consumes the first supported text-search category; image/news
+  // categories are intentionally ignored because their payloads differ.
+  // The first matching category wins even when it is empty.
+  for (const key of ["web", "results", "items"]) {
+    const nestedValue = nested[key]
+    if (Array.isArray(nestedValue)) return nestedValue
+  }
+
+  return null
+}
+
 function normalizeFirecrawlResult(item: unknown): WebSearchResult {
+  if (!item || typeof item !== "object") {
+    return { title: "Untitled", url: "", snippet: "", source: "" }
+  }
   const r = item as {
     title?: string
     url?: string
