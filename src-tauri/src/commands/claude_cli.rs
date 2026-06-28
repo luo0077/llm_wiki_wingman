@@ -30,6 +30,8 @@ use tokio::sync::Mutex;
 
 use super::cli_resolver::find_cli_command;
 
+const ISOLATED_MCP_CONFIG: &str = "{\"mcpServers\":{}}";
+
 /// Shared state holding running `claude` child processes keyed by the
 /// frontend-generated stream id. Registered via .manage() in lib.rs.
 #[derive(Default)]
@@ -404,7 +406,9 @@ fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String>
             "project".to_string(),
             "--strict-mcp-config".to_string(),
             "--mcp-config".to_string(),
-            "{}".to_string(),
+            // Claude's strict MCP config expects the top-level mcpServers key
+            // even when the isolated server set is intentionally empty.
+            ISOLATED_MCP_CONFIG.to_string(),
             "--disable-slash-commands".to_string(),
             "--tools".to_string(),
             "".to_string(),
@@ -517,11 +521,20 @@ mod tests {
         assert!(args.contains(&"sonnet".to_string()));
         assert!(!args.contains(&"--setting-sources".to_string()));
         assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!args.contains(&"--mcp-config".to_string()));
         assert!(!args.contains(&"--disable-slash-commands".to_string()));
     }
 
     #[test]
     fn claude_args_can_isolate_user_config_tools_and_mcp() {
+        assert_eq!(ISOLATED_MCP_CONFIG, "{\"mcpServers\":{}}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(ISOLATED_MCP_CONFIG).expect("isolated MCP config is valid JSON");
+        assert!(parsed
+            .get("mcpServers")
+            .and_then(|value| value.as_object())
+            .is_some_and(|servers| servers.is_empty()));
+
         let args = build_claude_cli_args("sonnet", true);
 
         assert!(args
@@ -530,7 +543,7 @@ mod tests {
         assert!(args.contains(&"--strict-mcp-config".to_string()));
         assert!(args
             .windows(2)
-            .any(|pair| pair[0] == "--mcp-config" && pair[1] == "{}"));
+            .any(|pair| pair[0] == "--mcp-config" && pair[1] == ISOLATED_MCP_CONFIG));
         assert!(args.contains(&"--disable-slash-commands".to_string()));
         assert!(args
             .windows(2)
