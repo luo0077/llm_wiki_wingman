@@ -63,6 +63,9 @@ import {
   getQueue,
   getQueueSummary,
   restoreQueue,
+  pauseProcessing,
+  resumeProcessing,
+  isQueuePaused,
 } from "./ingest-queue"
 import { autoIngest } from "./ingest"
 import { readFile, writeFile } from "@/commands/fs"
@@ -598,6 +601,98 @@ describe("ingest-queue — pauseQueue & switch-project survival", () => {
       const parsed = JSON.parse(String(content))
       expect(parsed).toEqual([])
     }
+  })
+})
+
+describe("ingest-queue — pause/resume processing", () => {
+  it("finishes the in-flight task but does not start the next while paused", async () => {
+    // First task is controllable; later calls would resolve immediately,
+    // but we assert they never happen while paused.
+    let resolveFirst: (f: string[]) => void = () => {}
+    mockAutoIngest.mockImplementationOnce(
+      () => new Promise<string[]>((r) => { resolveFirst = r }),
+    )
+    mockAutoIngest.mockResolvedValue(["wiki/sources/foo.md"])
+
+    await enqueueBatch(TEST_ID, [
+      { sourcePath: "a.md", folderContext: "" },
+      { sourcePath: "b.md", folderContext: "" },
+    ])
+    await flushMicrotasks(2)
+    expect(getQueue().find((t) => t.sourcePath === "a.md")?.status).toBe("processing")
+
+    // Pause while a.md is in flight — it must keep running, b.md must wait.
+    pauseProcessing()
+    expect(isQueuePaused()).toBe(true)
+
+    // a.md completes normally (pause never aborts in-flight work).
+    resolveFirst(["wiki/sources/a.md"])
+    await flushMicrotasks(10)
+
+    // a.md drained; b.md stays pending; autoIngest was called exactly once.
+    expect(mockAutoIngest).toHaveBeenCalledTimes(1)
+    expect(getQueue().find((t) => t.sourcePath === "a.md")).toBeUndefined()
+    expect(getQueue().find((t) => t.sourcePath === "b.md")?.status).toBe("pending")
+    expect(getQueueSummary().paused).toBe(true)
+  })
+
+  it("resumeProcessing restarts the queue and processes the pending task", async () => {
+    let resolveFirst: (f: string[]) => void = () => {}
+    mockAutoIngest.mockImplementationOnce(
+      () => new Promise<string[]>((r) => { resolveFirst = r }),
+    )
+    mockAutoIngest.mockResolvedValue(["wiki/sources/foo.md"])
+
+    await enqueueBatch(TEST_ID, [
+      { sourcePath: "a.md", folderContext: "" },
+      { sourcePath: "b.md", folderContext: "" },
+    ])
+    await flushMicrotasks(2)
+    pauseProcessing()
+    resolveFirst(["wiki/sources/a.md"])
+    await flushMicrotasks(10)
+    expect(mockAutoIngest).toHaveBeenCalledTimes(1)
+    expect(getQueue().find((t) => t.sourcePath === "b.md")?.status).toBe("pending")
+
+    // Resume → b.md is handed to the LLM and drains.
+    resumeProcessing()
+    await flushMicrotasks(10)
+    expect(mockAutoIngest).toHaveBeenCalledTimes(2)
+    expect(getQueue()).toHaveLength(0)
+    expect(isQueuePaused()).toBe(false)
+  })
+
+  it("does not run the drain-sweep while paused (no token spend)", async () => {
+    let resolveFirst: (f: string[]) => void = () => {}
+    mockAutoIngest.mockImplementationOnce(
+      () => new Promise<string[]>((r) => { resolveFirst = r }),
+    )
+
+    await enqueueIngest(TEST_ID, "only.md")
+    await flushMicrotasks(2)
+    pauseProcessing()
+    resolveFirst(["wiki/sources/only.md"])
+    await flushMicrotasks(10)
+
+    // Queue is empty after the in-flight task drained, but the paused
+    // guard short-circuits processNext before onQueueDrained fires.
+    expect(mockSweep).not.toHaveBeenCalled()
+  })
+
+  it("restoreQueue resets the paused flag — every project loads un-paused", async () => {
+    pauseProcessing()
+    expect(isQueuePaused()).toBe(true)
+
+    mockReadFile.mockRejectedValue(new Error("ENOENT"))
+    await restoreQueue(TEST_ID, TEST_PATH)
+    expect(isQueuePaused()).toBe(false)
+  })
+
+  it("clearQueueState resets the paused flag", async () => {
+    pauseProcessing()
+    expect(isQueuePaused()).toBe(true)
+    clearQueueState()
+    expect(isQueuePaused()).toBe(false)
   })
 })
 

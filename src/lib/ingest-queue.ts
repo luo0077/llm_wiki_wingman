@@ -25,6 +25,14 @@ export interface IngestTask {
 
 let queue: IngestTask[] = []
 let processing = false
+/** User-controlled pause. When true, processNext stops handing pending
+ *  tasks to the LLM — but the in-flight task (if any) is NOT aborted, it
+ *  runs to completion. The drain-sweep (also an LLM call) is suppressed
+ *  too, which is intentional for a "stop spending tokens" pause.
+ *  In-memory only: not persisted, reset to false on restoreQueue (so
+ *  every project loads un-paused) and clearQueueState. A pending queue
+ *  therefore auto-resumes on app restart — see resumeProcessing. */
+let paused = false
 /** UUID of the currently-active project. Used as a stale-context guard
  *  in processNext: if this changes mid-ingest (user switched projects),
  *  the orphaned runner bails instead of writing to the old project. */
@@ -339,6 +347,36 @@ export async function cancelAllTasks(): Promise<number> {
 }
 
 /**
+ * Pause queue processing. The currently-running task (if any) finishes
+ * normally — pause never aborts in-flight work — but no further pending
+ * tasks are handed to the LLM until resumeProcessing() is called. Use
+ * this to stop token spend without losing the queue or cancelling work.
+ *
+ * In-memory only: a paused queue auto-resumes on app restart / project
+ * switch (pending tasks are picked up by restoreQueue).
+ */
+export function pauseProcessing(): void {
+  paused = true
+  console.log("[Ingest Queue] Paused — in-flight task will finish; no new tasks will start")
+}
+
+/**
+ * Resume queue processing after pauseProcessing(). Kicks processNext so
+ * pending tasks start immediately. A no-op if a task is already running
+ * (the existing `if (processing) return` guard handles that).
+ */
+export function resumeProcessing(): void {
+  paused = false
+  console.log("[Ingest Queue] Resumed")
+  if (currentProjectId) processNext(currentProjectId)
+}
+
+/** Whether queue processing is currently paused by the user. */
+export function isQueuePaused(): boolean {
+  return paused
+}
+
+/**
  * Get current queue state.
  */
 export function getQueue(): readonly IngestTask[] {
@@ -348,7 +386,7 @@ export function getQueue(): readonly IngestTask[] {
 /**
  * Get queue summary.
  */
-export function getQueueSummary(): { pending: number; processing: number; failed: number; completed: number; total: number } {
+export function getQueueSummary(): { pending: number; processing: number; failed: number; completed: number; total: number; paused: boolean } {
   const activeTotal = queue.length + completedSinceIdle
   return {
     pending: queue.filter((t) => t.status === "pending").length,
@@ -356,6 +394,7 @@ export function getQueueSummary(): { pending: number; processing: number; failed
     failed: queue.filter((t) => t.status === "failed").length,
     completed: completedSinceIdle,
     total: activeTotal,
+    paused,
   }
 }
 
@@ -374,6 +413,7 @@ export function clearQueueState(): void {
   }
   queue = []
   processing = false
+  paused = false
   currentProjectId = ""
   currentProjectPath = ""
   currentAbortController = null
@@ -446,6 +486,9 @@ export async function restoreQueue(
   // pauseQueue, but clearing again costs nothing).
   queue = []
   processing = false
+  // Every project loads un-paused. Pause is a current-session control;
+  // it does not carry across project switches or app restarts.
+  paused = false
   currentAbortController = null
   lastWrittenFiles = []
   resetQueueAccounting()
@@ -517,6 +560,11 @@ async function processNext(projectId: string): Promise<void> {
   // Stale-context guard: processNext may be invoked by an orphaned
   // recursion from a previous project. If we're no longer active, bail.
   if (currentProjectId !== projectId) return
+  // User pause: don't hand the next pending task to the LLM. The
+  // in-flight task already running is unaffected (we don't abort it);
+  // it finishes, calls processNext again, and lands back here. Also
+  // skips the drain-sweep below — intended, since that's an LLM call.
+  if (paused) return
 
   const next = queue.find((t) => t.projectId === projectId && t.status === "pending")
   if (!next) {
