@@ -40,6 +40,17 @@ describe("raw source image resolver", () => {
     ).resolves.toBe(`${tmp.path}/raw/sources/project-a/config.pdf`)
   })
 
+  it("resolves media slugs for sources inside raw dotfolders", async () => {
+    if (!tmp) throw new Error("missing temp project")
+
+    await writeFileRaw(`${tmp.path}/raw/sources/.claude/research.md`, "dotfolder source\n")
+    const slug = sourceSummarySlugFromIdentity(".claude/research.md")
+
+    await expect(
+      findRawSourceForImage(`media/${slug}/img-1.png`, tmp.path),
+    ).resolves.toBe(`${tmp.path}/raw/sources/.claude/research.md`)
+  })
+
   it("resolves nested source media slugs created with legacy percent-encoded source slugs", async () => {
     if (!tmp) throw new Error("missing temp project")
 
