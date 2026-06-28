@@ -31,6 +31,7 @@ import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { inferWikiTypeFromPath } from "@/lib/wiki-page-types"
 import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from "@/lib/chat-save-to-wiki"
 import type { ChatAgentEvent, ChatAgentEventStage, ChatAgentStep } from "@/lib/chat-agent"
+import { filterRawSourceTree } from "@/lib/source-filter"
 
 // Module-level cache of source file names
 let cachedSourceFiles: string[] = []
@@ -42,6 +43,7 @@ export function useSourceFiles() {
     if (!project) return
     const pp = normalizePath(project.path)
     listDirectory(`${pp}/raw/sources`, true)
+      .then(filterRawSourceTree)
       .then((tree) => {
         cachedSourceFiles = flattenNames(tree)
       })

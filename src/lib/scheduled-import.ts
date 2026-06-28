@@ -55,7 +55,7 @@ const DB_PATH = ".llm-wiki/scheduled-import-db.json"
 const LEGACY_DB_DIR = ".llm-wiki-imported"
 const SCHEDULED_IMPORT_DIR = "scheduled-import"
 const MAX_SCHEDULED_IMPORT_BYTES = 100 * 1024 * 1024
-const SENSITIVE_CONFIG_EXTENSIONS = new Set(["json", "yaml", "yml", "xml"])
+const SCHEDULED_IMPORT_CONFIG_EXTENSIONS = new Set(["json", "yaml", "yml", "xml"])
 const RESERVED_WINDOWS_NAMES = new Set([
   "con",
   "prn",
@@ -227,10 +227,10 @@ export function shouldSkipScheduledImportFile(
   return name.startsWith(".")
 }
 
-function isSensitiveConfigFile(path: string): boolean {
+export function shouldSkipScheduledImportConfigFile(path: string): boolean {
   const name = normalizePath(path).split("/").pop() ?? ""
   const ext = name.includes(".") ? name.split(".").pop()?.toLowerCase() : ""
-  return Boolean(ext && SENSITIVE_CONFIG_EXTENSIONS.has(ext))
+  return Boolean(ext && SCHEDULED_IMPORT_CONFIG_EXTENSIONS.has(ext))
 }
 
 export function resolveImportPath(projectPath: string, configPath: string): string {
@@ -364,7 +364,7 @@ export async function scanAndImport(
         const sourcePath = normalizePath(file.path)
         if (
           shouldSkipScheduledImportFile(projectPath, sourcePath) ||
-          isSensitiveConfigFile(sourcePath) ||
+          shouldSkipScheduledImportConfigFile(sourcePath) ||
           !isIngestableSourcePath(sourcePath)
         ) {
           continue

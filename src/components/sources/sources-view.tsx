@@ -19,6 +19,7 @@ import {
   importSourceFiles,
   importSourceFolder,
 } from "@/lib/source-lifecycle"
+import { filterRawSourceTree } from "@/lib/source-filter"
 
 const SOURCE_TREE_INITIAL_ROWS = 160
 const SOURCE_TREE_LOAD_BATCH = 160
@@ -66,10 +67,7 @@ export function SourcesView() {
     const pp = normalizePath(project.path)
     try {
       const tree = await listDirectory(`${pp}/raw/sources`, true)
-      // Keep user-added dotfolders (.claude, .codex) but drop ingest
-      // noise (.cache, .DS_Store) — see filterTree.
-      const filtered = filterTree(tree)
-      setSources(filtered)
+      setSources(filterRawSourceTree(tree))
       setRefreshError(null)
     } catch (err) {
       setRefreshError(String(err))
@@ -363,23 +361,6 @@ export function SourcesView() {
 interface SourceTreeRow {
   node: FileNode
   depth: number
-}
-
-// Ingest-generated noise hidden from the sources tree even though the
-// listing now includes dot entries. User-added dotfolders (.claude,
-// .codex) pass through; only these internal artifacts are dropped.
-const HIDDEN_SOURCE_ENTRIES = new Set([".cache", ".DS_Store"])
-
-function filterTree(nodes: FileNode[]): FileNode[] {
-  return nodes
-    .filter((n) => !HIDDEN_SOURCE_ENTRIES.has(n.name))
-    .map((n) => {
-      if (n.is_dir && n.children) {
-        return { ...n, children: filterTree(n.children) }
-      }
-      return n
-    })
-    .filter((n) => !n.is_dir || (n.children && n.children.length > 0))
 }
 
 function countFiles(nodes: FileNode[]): number {

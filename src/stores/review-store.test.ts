@@ -24,6 +24,15 @@ describe("reviewIdFor — content-stable id", () => {
       .toBe(reviewIdFor({ type: "missing-page", title: "缺失页面: Attention" }))
   })
 
+  it("matches the API stable-id fixtures", () => {
+    expect(reviewIdFor({ type: "missing-page", title: "Missing page: Attention" }))
+      .toBe("review-dbdcf949")
+    expect(reviewIdFor({ type: "missing-page", title: "Missing page Attention" }))
+      .toBe("review-fa5d9960")
+    expect(reviewIdFor({ type: "missing-page", title: "疑似重复 注意力" }))
+      .toBe("review-d2dacda0")
+  })
+
   it("differs across types", () => {
     expect(reviewIdFor({ type: "missing-page", title: "Attention" }))
       .not.toBe(reviewIdFor({ type: "duplicate", title: "Attention" }))

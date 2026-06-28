@@ -1036,13 +1036,22 @@ fn normalize_review_title(title: &str) -> String {
         "重复页面",
         "疑似重复",
     ] {
-        if lower.starts_with(prefix) {
-            rest = &trimmed[prefix.len()..];
-            rest = rest.trim_start_matches(|ch: char| ch == ':' || ch == '：' || ch.is_whitespace());
+        if !lower.starts_with(prefix) {
+            continue;
+        }
+        let suffix = &trimmed[prefix.len()..];
+        let Some(delimiter) = suffix.chars().next() else {
+            continue;
+        };
+        if delimiter == ':' || delimiter == '：' {
+            rest = suffix[delimiter.len_utf8()..].trim_start();
             break;
         }
     }
-    rest.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    rest.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn review_id_for_parts(item_type: &str, title: &str) -> String {
@@ -1079,9 +1088,26 @@ fn load_review_items(project_path: &str, query: &ReviewQuery) -> Result<Vec<Valu
         .as_array()
         .ok_or_else(|| "Invalid review state JSON: expected an array".to_string())?;
 
-    let mut reviews: Vec<Value> = Vec::new();
+    let mut normalized: Vec<Value> = Vec::new();
     let mut index_by_id: BTreeMap<String, usize> = BTreeMap::new();
     for item in items {
+        let sanitized = sanitize_review_item(item);
+        let id = sanitized
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(id) = id {
+            if let Some(existing_idx) = index_by_id.get(&id).copied() {
+                merge_sanitized_review(&mut normalized[existing_idx], &sanitized);
+                continue;
+            }
+            index_by_id.insert(id, normalized.len());
+        }
+        normalized.push(sanitized);
+    }
+
+    let mut reviews: Vec<Value> = Vec::new();
+    for item in normalized {
         let resolved = item
             .get("resolved")
             .and_then(Value::as_bool)
@@ -1094,23 +1120,10 @@ fn load_review_items(project_path: &str, query: &ReviewQuery) -> Result<Vec<Valu
                 continue;
             }
         }
-        let sanitized = sanitize_review_item(item);
-        let id = sanitized.get("id").and_then(Value::as_str).map(str::to_string);
-        if let Some(id) = id {
-            if let Some(existing_idx) = index_by_id.get(&id).copied() {
-                merge_sanitized_review(&mut reviews[existing_idx], &sanitized);
-                continue;
-            }
-            if reviews.len() >= query.limit {
-                break;
-            }
-            index_by_id.insert(id, reviews.len());
-            reviews.push(sanitized);
-        } else if reviews.len() < query.limit {
-            reviews.push(sanitized);
-        } else {
+        if reviews.len() >= query.limit {
             break;
         }
+        reviews.push(item);
     }
 
     Ok(reviews)
@@ -1156,7 +1169,10 @@ fn merge_sanitized_review(existing: &mut Value, incoming: &Value) {
 
     if resolved && !existing.contains_key("resolvedAction") {
         if let Some(action) = incoming.get("resolvedAction").and_then(Value::as_str) {
-            existing.insert("resolvedAction".to_string(), Value::String(action.to_string()));
+            existing.insert(
+                "resolvedAction".to_string(),
+                Value::String(action.to_string()),
+            );
         }
     }
 
@@ -1182,11 +1198,18 @@ fn merge_sanitized_review(existing: &mut Value, incoming: &Value) {
             .get("createdAt")
             .and_then(Value::as_f64)
             .unwrap_or(incoming_created);
-        existing.insert("createdAt".to_string(), json!(existing_created.min(incoming_created)));
+        existing.insert(
+            "createdAt".to_string(),
+            json!(existing_created.min(incoming_created)),
+        );
     }
 }
 
-fn merge_string_array_field(existing: &mut Map<String, Value>, incoming: &Map<String, Value>, key: &str) {
+fn merge_string_array_field(
+    existing: &mut Map<String, Value>,
+    incoming: &Map<String, Value>,
+    key: &str,
+) {
     let mut values = existing
         .get(key)
         .and_then(Value::as_array)
@@ -1476,9 +1499,9 @@ fn resolve_review_items(
     for item in items.iter_mut() {
         let raw_id = item.get("id").and_then(Value::as_str);
         let stable_id = stable_review_id(item);
-        let matched_request = ids.iter().find(|id| {
-            raw_id == Some(id.as_str()) || stable_id.as_deref() == Some(id.as_str())
-        });
+        let matched_request = ids
+            .iter()
+            .find(|id| raw_id == Some(id.as_str()) || stable_id.as_deref() == Some(id.as_str()));
         let Some(requested_id) = matched_request else {
             continue;
         };
@@ -1496,7 +1519,11 @@ fn resolve_review_items(
     }
 
     // Preserve the caller's input order; dedupe is implicit via `found`.
-    let resolved: Vec<String> = ids.iter().filter(|id| found.contains(*id)).cloned().collect();
+    let resolved: Vec<String> = ids
+        .iter()
+        .filter(|id| found.contains(*id))
+        .cloned()
+        .collect();
     let not_found: Vec<String> = ids
         .iter()
         .filter(|id| !found.contains(*id))
@@ -1512,7 +1539,10 @@ fn apply_resolution(item: &mut Value, resolved: bool, action: Option<&str>) {
         if !resolved {
             obj.remove("resolvedAction");
         } else if let Some(action) = action {
-            obj.insert("resolvedAction".to_string(), Value::String(action.to_string()));
+            obj.insert(
+                "resolvedAction".to_string(),
+                Value::String(action.to_string()),
+            );
         }
     }
 }
@@ -1919,6 +1949,43 @@ mod tests {
     }
 
     #[test]
+    fn review_title_normalization_requires_a_prefix_delimiter() {
+        assert_eq!(
+            normalize_review_title("Missing page: Attention"),
+            "attention"
+        );
+        assert_eq!(
+            normalize_review_title(" Missing page: Attention"),
+            "attention"
+        );
+        assert_eq!(
+            normalize_review_title("Missing page Attention"),
+            "missing page attention"
+        );
+        assert_eq!(normalize_review_title("疑似重复 注意力"), "疑似重复 注意力");
+        assert_ne!(
+            review_id_for_parts("missing-page", "Missing page: Attention"),
+            review_id_for_parts("missing-page", "Missing page Attention")
+        );
+        assert_eq!(
+            review_id_for_parts("missing-page", "Missing page: Attention"),
+            "review-dbdcf949"
+        );
+        assert_eq!(
+            review_id_for_parts("missing-page", " Missing page: Attention"),
+            "review-dbdcf949"
+        );
+        assert_eq!(
+            review_id_for_parts("missing-page", "Missing page Attention"),
+            "review-fa5d9960"
+        );
+        assert_eq!(
+            review_id_for_parts("missing-page", "疑似重复 注意力"),
+            "review-d2dacda0"
+        );
+    }
+
+    #[test]
     fn review_query_filters_by_type_status_and_limit() {
         let root = test_project_dir();
         let state_dir = root.join(".llm-wiki");
@@ -1993,7 +2060,10 @@ mod tests {
             reviews[0].get("id").and_then(Value::as_str),
             Some(review_id_for_parts("missing-page", "Attention").as_str())
         );
-        assert_eq!(reviews[0].get("resolved").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            reviews[0].get("resolved").and_then(Value::as_bool),
+            Some(true)
+        );
         assert_eq!(
             reviews[0].get("resolvedAction").and_then(Value::as_str),
             Some("user-resolved")
@@ -2005,7 +2075,52 @@ mod tests {
                 .map(|pages| pages.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
             Some(vec!["a.md", "b.md"])
         );
-        assert_eq!(reviews[0].get("createdAt").and_then(Value::as_f64), Some(2.0));
+        assert_eq!(
+            reviews[0].get("createdAt").and_then(Value::as_f64),
+            Some(2.0)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn review_query_filters_status_after_stable_id_merge() {
+        let root = test_project_dir();
+        let state_dir = root.join(".llm-wiki");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::write(
+            state_dir.join("review.json"),
+            json!([
+                {
+                    "id": "review-old-unresolved",
+                    "type": "missing-page",
+                    "title": "Attention",
+                    "resolved": false,
+                    "createdAt": 5
+                },
+                {
+                    "id": "review-old-resolved",
+                    "type": "missing-page",
+                    "title": "Missing page: Attention",
+                    "resolved": true,
+                    "resolvedAction": "Done",
+                    "createdAt": 6
+                }
+            ])
+            .to_string(),
+        )
+        .unwrap();
+
+        let unresolved = parse_review_query("status=unresolved").unwrap();
+        let unresolved_reviews = load_review_items(root.to_str().unwrap(), &unresolved).unwrap();
+        assert!(unresolved_reviews.is_empty());
+
+        let all = parse_review_query("status=all").unwrap();
+        let all_reviews = load_review_items(root.to_str().unwrap(), &all).unwrap();
+        assert_eq!(all_reviews.len(), 1);
+        assert_eq!(
+            all_reviews[0].get("resolved").and_then(Value::as_bool),
+            Some(true)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2050,7 +2165,10 @@ mod tests {
             .find(|i| i.get("id").and_then(Value::as_str) == Some("r1"))
             .unwrap();
         assert_eq!(r1.get("resolved").and_then(Value::as_bool), Some(true));
-        assert_eq!(r1.get("resolvedAction").and_then(Value::as_str), Some("Skip"));
+        assert_eq!(
+            r1.get("resolvedAction").and_then(Value::as_str),
+            Some("Skip")
+        );
         assert_eq!(
             r1.get("internalSecret").and_then(Value::as_str),
             Some("keep-me")
@@ -2085,9 +2203,15 @@ mod tests {
 
         let parsed = read_reviews(&root);
         let item = &parsed.as_array().unwrap()[0];
-        assert_eq!(item.get("id").and_then(Value::as_str), Some(stable_id.as_str()));
+        assert_eq!(
+            item.get("id").and_then(Value::as_str),
+            Some(stable_id.as_str())
+        );
         assert_eq!(item.get("resolved").and_then(Value::as_bool), Some(true));
-        assert_eq!(item.get("resolvedAction").and_then(Value::as_str), Some("API"));
+        assert_eq!(
+            item.get("resolvedAction").and_then(Value::as_str),
+            Some("API")
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2155,16 +2279,28 @@ mod tests {
                 .find(|i| i.get("id").and_then(Value::as_str) == Some(id))
                 .unwrap()
         };
-        assert_eq!(by_id("r1").get("resolved").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            by_id("r1").get("resolved").and_then(Value::as_bool),
+            Some(true)
+        );
         assert_eq!(
             by_id("r1").get("resolvedAction").and_then(Value::as_str),
             Some("Bulk")
         );
         // Unsanitized field survives the bulk write-back too.
-        assert_eq!(by_id("r1").get("internalSecret").and_then(Value::as_str), Some("a"));
-        assert_eq!(by_id("r3").get("resolved").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            by_id("r1").get("internalSecret").and_then(Value::as_str),
+            Some("a")
+        );
+        assert_eq!(
+            by_id("r3").get("resolved").and_then(Value::as_bool),
+            Some(true)
+        );
         // r2 was not in the request — untouched.
-        assert_eq!(by_id("r2").get("resolved").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            by_id("r2").get("resolved").and_then(Value::as_bool),
+            Some(false)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2200,10 +2336,19 @@ mod tests {
         assert_eq!(not_found, vec!["missing".to_string()]);
         let parsed = read_reviews(&root);
         let items = parsed.as_array().unwrap();
-        assert_eq!(items[0].get("id").and_then(Value::as_str), Some(ids[0].as_str()));
-        assert_eq!(items[0].get("resolved").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            items[0].get("id").and_then(Value::as_str),
+            Some(ids[0].as_str())
+        );
+        assert_eq!(
+            items[0].get("resolved").and_then(Value::as_bool),
+            Some(true)
+        );
         assert_eq!(items[1].get("id").and_then(Value::as_str), Some("review-2"));
-        assert_eq!(items[1].get("resolved").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            items[1].get("resolved").and_then(Value::as_bool),
+            Some(false)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2211,7 +2356,8 @@ mod tests {
     fn resolve_review_items_missing_file_reports_all_not_found() {
         let root = test_project_dir();
         let ids = vec!["r1".to_string(), "r2".to_string()];
-        let (resolved, not_found) = resolve_review_items(root.to_str().unwrap(), &ids, None).unwrap();
+        let (resolved, not_found) =
+            resolve_review_items(root.to_str().unwrap(), &ids, None).unwrap();
         assert!(resolved.is_empty());
         assert_eq!(not_found, ids);
         let _ = fs::remove_dir_all(root);

@@ -2067,7 +2067,10 @@ mod tests {
 
         // The dotfolder's children come through too.
         let claude = shown.iter().find(|n| n.name == ".claude").unwrap();
-        let kids = claude.children.as_ref().expect(".claude should have children");
+        let kids = claude
+            .children
+            .as_ref()
+            .expect(".claude should have children");
         assert!(kids.iter().any(|n| n.name == "CLAUDE.md"));
 
         let _ = fs::remove_dir_all(root);

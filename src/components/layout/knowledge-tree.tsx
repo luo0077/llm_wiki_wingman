@@ -10,6 +10,7 @@ import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { cascadeDeleteWikiPagesWithRefs } from "@/lib/wiki-page-delete"
 import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
+import { filterRawSourceTree } from "@/lib/source-filter"
 
 interface WikiPageInfo {
   path: string
@@ -252,7 +253,7 @@ function RawSourcesSection() {
   useEffect(() => {
     if (!project) return
     const pp = normalizePath(project.path)
-    listDirectory(`${pp}/raw/sources`, true)
+    listDirectory(`${pp}/raw/sources`, true).then(filterRawSourceTree)
       .then((tree) => setSources(flattenAllFiles(tree)))
       .catch(() => setSources([]))
   }, [project])
