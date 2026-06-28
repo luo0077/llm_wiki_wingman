@@ -59,7 +59,7 @@ const SEARCH_PROVIDERS = [
     label: "Brave Search",
     hint: "Independent index with privacy focus (api.search.brave.com)",
     keyPlaceholder: "Enter your Brave Search API subscription token",
-    needsApiKey: true,
+    configKind: "key",
   },
 ] as const
 
