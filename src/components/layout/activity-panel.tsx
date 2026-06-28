@@ -95,6 +95,9 @@ export function ActivityPanel() {
 
   const queueSummary = getQueueSummary()
   const hasQueue = queueSummary.total > 0
+  const shouldResumeQueue =
+    queueSummary.userPaused ||
+    (queueSummary.restoredBacklogWaiting && queueSummary.processing === 0)
   const hasFileSync = fileSyncTasks.length > 0 || Boolean(fileSyncError)
   const fileSyncPending = fileSyncTasks.filter((t) => t.status === "pending").length
   const fileSyncProcessing = fileSyncTasks.filter((t) => t.status === "processing").length
@@ -135,12 +138,12 @@ export function ActivityPanel() {
 
   const handleTogglePause = useCallback(() => {
     if (!project) return
-    if (queueSummary.paused) {
+    if (shouldResumeQueue) {
       resumeProcessing()
     } else {
       pauseProcessing()
     }
-  }, [project, queueSummary.paused])
+  }, [project, shouldResumeQueue])
 
   const handleFileSyncRescan = useCallback(() => {
     if (!project) return
@@ -262,25 +265,33 @@ export function ActivityPanel() {
           {hasQueue && (queueSummary.processing > 0 || queueSummary.pending > 0) && (
             <div className="px-3 py-1.5 border-b border-border/50">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1 gap-2">
-                <span>{queueSummary.paused ? t("activity.ingestQueuePaused") : t("activity.ingestQueue")}</span>
+                <span>
+                  {queueSummary.paused && queueSummary.processing === 0
+                    ? t("activity.ingestQueuePaused")
+                    : t("activity.ingestQueue")}
+                </span>
                 <span className="flex-1 text-right">
                   {t("activity.queueCompleteCount", {
                     done: queueSummary.completed + queueSummary.failed,
                     total: queueSummary.total,
                   })}
                 </span>
-                {(queueSummary.pending > 0 || queueSummary.paused) && (
+                {(queueSummary.processing > 0 || queueSummary.pending > 0 || queueSummary.paused) && (
                   <button
                     onClick={handleTogglePause}
                     className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] hover:bg-accent hover:text-foreground"
                     title={
-                      queueSummary.paused
+                      shouldResumeQueue
                         ? t("activity.resumeQueueTitle")
                         : t("activity.pauseQueueTitle")
                     }
                   >
-                    {queueSummary.paused ? <Play className="h-2.5 w-2.5" /> : <Pause className="h-2.5 w-2.5" />}
-                    {queueSummary.paused ? t("activity.resumeQueue") : t("activity.pauseQueue")}
+                    {shouldResumeQueue
+                      ? <Play className="h-2.5 w-2.5" />
+                      : <Pause className="h-2.5 w-2.5" />}
+                    {shouldResumeQueue
+                      ? t("activity.resumeQueue")
+                      : t("activity.pauseQueue")}
                   </button>
                 )}
                 {queueSummary.pending + queueSummary.processing >= 2 && (

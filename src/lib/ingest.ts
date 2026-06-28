@@ -476,9 +476,10 @@ export async function autoIngest(
   llmConfig: LlmConfig,
   signal?: AbortSignal,
   folderContext?: string,
+  onFileWritten?: (relativePath: string) => void,
 ): Promise<string[]> {
   return withProjectLock(normalizePath(projectPath), () =>
-    autoIngestImpl(projectPath, sourcePath, llmConfig, signal, folderContext),
+    autoIngestImpl(projectPath, sourcePath, llmConfig, signal, folderContext, onFileWritten),
   )
 }
 
@@ -499,6 +500,7 @@ async function autoIngestImpl(
   llmConfig: LlmConfig,
   signal?: AbortSignal,
   folderContext?: string,
+  onFileWritten?: (relativePath: string) => void,
 ): Promise<string[]> {
   const pp = normalizePath(projectPath)
   const sp = normalizePath(sourcePath)
@@ -958,6 +960,7 @@ async function autoIngestImpl(
     sourceSummaryPath,
     signal,
     activityId,
+    onFileWritten,
   )
   throwIfIngestAborted(signal, activityId)
   const writtenPaths = writeResult.writtenPaths
@@ -1033,6 +1036,7 @@ async function autoIngestImpl(
           sourceSummaryPath,
           signal,
           activityId,
+          onFileWritten,
         )
         writtenPaths.push(...repairResult.writtenPaths)
         writeWarnings.push(...repairResult.warnings)
@@ -1088,6 +1092,7 @@ async function autoIngestImpl(
     try {
       await writeFile(sourceSummaryFullPath, fallbackContent)
       writtenPaths.push(sourceSummaryPath)
+      onFileWritten?.(sourceSummaryPath)
     } catch {
       // non-critical
     }
@@ -1536,6 +1541,7 @@ async function writeFileBlocks(
   sourceSummaryPath?: string,
   signal?: AbortSignal,
   activityId?: string,
+  onFileWritten?: (relativePath: string) => void,
 ): Promise<{ writtenPaths: string[]; warnings: string[]; hardFailures: string[] }> {
   const { blocks, warnings: parseWarnings } = parseFileBlocks(text)
   const warnings = [...parseWarnings]
@@ -1673,6 +1679,7 @@ async function writeFileBlocks(
         await writeFile(fullPath, toWrite)
       }
       writtenPaths.push(relativePath)
+      onFileWritten?.(relativePath)
     } catch (err) {
       const msg = `Failed to write "${relativePath}": ${err instanceof Error ? err.message : String(err)}`
       console.error(`[ingest] ${msg}`)
