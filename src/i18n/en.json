@@ -219,6 +219,8 @@
   "review": {
     "title": "Review",
     "clearResolved": "Clear resolved",
+    "refresh": "Refresh",
+    "refreshHint": "Reload review items from disk",
     "allClear": "All clear — nothing to review",
     "resolvedDivider": "— Resolved —"
   },
@@ -555,6 +557,8 @@
         "endpointFilesNote": "?root=wiki|sources|all; ?recursive=false; ?maxFiles=N (≤10000).",
         "endpointContentNote": "?path=wiki/index.md — text files only, 2 MB max.",
         "endpointReviewsNote": "?status=unresolved|resolved|all; ?type=missing-page; ?limit=N. Defaults to unresolved Review items.",
+        "endpointPatchReviewNote": "Update one Review item. JSON body: { resolved?, action? } (resolved defaults to true; pass false to reopen). Use the Review tab's Refresh button to re-read.",
+        "endpointBulkResolveNote": "Bulk-resolve Review items. JSON body: { ids, action? }. Returns { resolved, notFound, count }.",
         "endpointSearchNote": "JSON body: { query, topK?, includeContent?, queryEmbedding? }. Uses shared keyword + vector retrieval when embeddings are configured.",
         "endpointGraphNote": "?q=…&nodeType=…&limit=N — wikilinks graph derived from wiki/*.md.",
         "endpointRescanNote": "Triggers a backend rescan using your Source Watch config.",
