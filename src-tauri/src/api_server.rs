@@ -1322,7 +1322,9 @@ fn resolve_review_items(
 fn apply_resolution(item: &mut Value, resolved: bool, action: Option<&str>) {
     if let Some(obj) = item.as_object_mut() {
         obj.insert("resolved".to_string(), Value::Bool(resolved));
-        if let Some(action) = action {
+        if !resolved {
+            obj.remove("resolvedAction");
+        } else if let Some(action) = action {
             obj.insert("resolvedAction".to_string(), Value::String(action.to_string()));
         }
     }
@@ -1825,6 +1827,7 @@ mod tests {
         let parsed = read_reviews(&root);
         let r1 = &parsed.as_array().unwrap()[0];
         assert_eq!(r1.get("resolved").and_then(Value::as_bool), Some(false));
+        assert!(r1.get("resolvedAction").is_none());
         let _ = fs::remove_dir_all(root);
     }
 

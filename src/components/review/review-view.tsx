@@ -45,7 +45,7 @@ export function ReviewView() {
   // Reload review items from disk. The review pane has no equivalent of
   // lint's re-run, so external writers — the resolve API, another window,
   // a manual edit of review.json — would otherwise stay invisible until
-  // the project is reopened. This is the "새로고침" affordance.
+  // the project is reopened.
   const handleRefresh = useCallback(async () => {
     if (!project || refreshing) return
     setRefreshing(true)
