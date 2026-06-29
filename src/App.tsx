@@ -72,6 +72,34 @@ function App() {
     }
   }
 
+  async function hydrateScheduledImportAfterOpen(proj: WikiProject): Promise<void> {
+    try {
+      const savedScheduledImport = await loadScheduledImportConfig(proj.path)
+      if (!isCurrentProject(proj)) return
+      if (savedScheduledImport) {
+        // Migrate relative path to absolute (backward compatibility)
+        let path = savedScheduledImport.path
+        if (path && !path.startsWith("/") && !path.match(/^[a-zA-Z]:[/\\]/)) {
+          path = `${proj.path}/${path}`
+        }
+        useWikiStore.getState().setScheduledImportConfig({
+          ...savedScheduledImport,
+          path,
+        })
+      }
+
+      const scheduledImportConfig = useWikiStore.getState().scheduledImportConfig
+      if (!isCurrentProject(proj)) return
+      if (scheduledImportConfig.enabled && scheduledImportConfig.path && scheduledImportConfig.interval > 0) {
+        const { startScheduledImport } = await import("@/lib/scheduled-import")
+        if (!isCurrentProject(proj)) return
+        startScheduledImport(proj, scheduledImportConfig)
+      }
+    } catch (err) {
+      console.warn("[startup] failed to hydrate scheduled import:", err)
+    }
+  }
+
   // Set up auto-save and clip watcher once on mount
   useEffect(() => {
     setupAutoSave()
@@ -366,6 +394,12 @@ function App() {
       setSelectedFile(null)
       setFileTree([])
       setActiveView("wiki")
+      useWikiStore.getState().setScheduledImportConfig({
+        enabled: false,
+        path: `${proj.path}/raw/sources`,
+        interval: 60,
+        lastScan: null,
+      })
       // Bump data version so any cached graphs/views invalidate
       useWikiStore.getState().bumpDataVersion()
       await saveLastProject(proj)
@@ -387,41 +421,6 @@ function App() {
           console.error("Failed to restore dedup queue:", err)
         )
       })
-      // Load per-project scheduled import config
-      try {
-        const savedScheduledImport = await loadScheduledImportConfig(proj.path)
-        if (savedScheduledImport) {
-          // Migrate relative path to absolute (backward compatibility)
-          let path = savedScheduledImport.path
-          if (path && !path.startsWith("/") && !path.match(/^[a-zA-Z]:[/\\]/)) {
-            path = `${proj.path}/${path}`
-          }
-          useWikiStore.getState().setScheduledImportConfig({
-            ...savedScheduledImport,
-            path,
-          })
-        } else {
-          // Reset to default for new projects
-          useWikiStore.getState().setScheduledImportConfig({
-            enabled: false,
-            path: `${proj.path}/raw/sources`,
-            interval: 60,
-            lastScan: null,
-          })
-        }
-      } catch {
-        // ignore
-      }
-      // Start scheduled import if enabled
-      const scheduledImportConfig = useWikiStore.getState().scheduledImportConfig
-      if (scheduledImportConfig.enabled && scheduledImportConfig.path && scheduledImportConfig.interval > 0) {
-        import("@/lib/scheduled-import").then(({ startScheduledImport }) => {
-          startScheduledImport(proj, scheduledImportConfig)
-        }).catch((err) =>
-          console.error("Failed to start scheduled import:", err)
-        )
-      }
-
       // Start project source watch if enabled
       import("@/lib/project-file-sync").then(async ({ startProjectFileSync, stopProjectFileSync }) => {
         const config = await loadSourceWatchConfig(proj.id)
@@ -469,6 +468,7 @@ function App() {
       setFileTree([])
       setSelectedFile(null)
     })
+    void hydrateScheduledImportAfterOpen(proj)
     // Heavy side-store hydration happens after the project shell is allowed
     // to render. Each write has a stale-project guard so a fast project switch
     // cannot apply old review/lint/chat state to the new project.
