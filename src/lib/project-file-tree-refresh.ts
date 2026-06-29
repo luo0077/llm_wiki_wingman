@@ -53,7 +53,7 @@ export async function refreshProjectFileTree(
     try {
       const shallowTree = await listDirectory(normalizedProjectPath, { maxDepth: 2 })
       if (isStillCurrentProject(currentProjectId, normalizedProjectPath)) {
-        useWikiStore.getState().setFileTree(shallowTree)
+        useWikiStore.getState().setFileTree(shallowTree, { syncPathIndex: false })
       }
     } catch (err) {
       console.error("Failed to refresh project file tree:", err)
@@ -61,6 +61,7 @@ export async function refreshProjectFileTree(
   }
 
   if (refreshPathIndex) {
+    if (!isStillCurrentProject(currentProjectId, normalizedProjectPath)) return
     listDirectoryWithRetry(normalizedProjectPath, undefined, 3)
       .then((fullTree) => {
         if (!isStillCurrentProject(currentProjectId, normalizedProjectPath)) return

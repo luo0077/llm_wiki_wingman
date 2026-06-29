@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { useWikiStore } from "@/stores/wiki-store"
 import type { FileNode, WikiProject } from "@/types/wiki"
+import { buildProjectPathIndexFromTree } from "@/lib/wiki-page-resolver"
 
 const mocks = vi.hoisted(() => ({
   listDirectory: vi.fn(),
@@ -97,6 +98,61 @@ describe("refreshProjectFileTree", () => {
     })
     await flushMicrotasks()
 
+    expect(useWikiStore.getState().fileTree).toEqual([])
+    expect(useWikiStore.getState().projectPathIndex.byPath.size).toBe(0)
+    expect(useWikiStore.getState().dataVersion).toBe(0)
+  })
+
+  it("keeps the existing full resolver index when shallow refresh succeeds but full refresh fails", async () => {
+    vi.useFakeTimers()
+    const existingIndex = buildProjectPathIndexFromTree(fullTree)
+    try {
+      useWikiStore.setState({
+        projectPathIndex: existingIndex,
+      })
+      mocks.listDirectory.mockImplementation(async (_path: string, options?: { maxDepth?: number }) => {
+        if (options?.maxDepth === 2) return shallowTree
+        throw new Error("full scan failed")
+      })
+
+      await refreshProjectFileTree(project.path, { projectId: project.id })
+      await flushMicrotasks()
+      await vi.advanceTimersByTimeAsync(250)
+      await flushMicrotasks()
+      await vi.advanceTimersByTimeAsync(250)
+      await flushMicrotasks()
+
+      expect(mocks.listDirectory).toHaveBeenNthCalledWith(1, project.path, { maxDepth: 2 })
+      expect(mocks.listDirectory).toHaveBeenNthCalledWith(2, project.path, undefined)
+      expect(mocks.listDirectory).toHaveBeenNthCalledWith(3, project.path, undefined)
+      expect(mocks.listDirectory).toHaveBeenNthCalledWith(4, project.path, undefined)
+      expect(useWikiStore.getState().fileTree).toEqual(shallowTree)
+      expect(useWikiStore.getState().projectPathIndex.byPath.has("/tmp/project/wiki/entities/alpha.md")).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not start the background full scan once the shallow refresh reveals a stale project", async () => {
+    mocks.listDirectory.mockImplementation(async (_path: string, options?: { maxDepth?: number }) => {
+      if (options?.maxDepth === 2) {
+        // Simulate switching projects while the shallow tree request is in flight.
+        useWikiStore.setState({
+          project: { ...project, id: "other-project", path: "/tmp/other" },
+        })
+        return shallowTree
+      }
+      return fullTree
+    })
+
+    await refreshProjectFileTree(project.path, {
+      projectId: project.id,
+      bumpDataVersion: true,
+    })
+    await flushMicrotasks()
+
+    expect(mocks.listDirectory).toHaveBeenCalledTimes(1)
+    expect(mocks.listDirectory).toHaveBeenCalledWith(project.path, { maxDepth: 2 })
     expect(useWikiStore.getState().fileTree).toEqual([])
     expect(useWikiStore.getState().projectPathIndex.byPath.size).toBe(0)
     expect(useWikiStore.getState().dataVersion).toBe(0)
