@@ -43,7 +43,7 @@ export function KnowledgeTree() {
   const selectedFile = useWikiStore((s) => s.selectedFile)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const openPathInPreview = useWikiStore((s) => s.openPathInPreview)
-  const fileTree = useWikiStore((s) => s.fileTree)
+  const dataVersion = useWikiStore((s) => s.dataVersion)
   const [pages, setPages] = useState<WikiPageInfo[]>([])
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(["overview", "entity", "concept", "source"]))
   // Two-stage delete: first click arms the row, second click executes.
@@ -82,10 +82,12 @@ export function KnowledgeTree() {
     }
   }, [project])
 
-  // Reload when file tree changes (after ingest writes new pages)
+  // Reload when wiki data changes. Do not key this off the visible
+  // sidebar file tree: lazy directory expansion mutates that tree and
+  // should not force a full wiki metadata re-parse.
   useEffect(() => {
     loadPages()
-  }, [loadPages, fileTree])
+  }, [loadPages, dataVersion])
 
   const handleDeleteClick = useCallback(
     async (pagePath: string) => {
