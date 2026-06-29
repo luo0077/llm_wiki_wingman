@@ -31,6 +31,13 @@ jobs:
             rust_target: ''
 
     runs-on: ${{ matrix.platform }}
+    env:
+      # GitHub-hosted runners occasionally hit crates.io HTTP/2 stream
+      # resets while downloading large dependency graphs. Cargo retries plus
+      # HTTP/1.1 transport make release builds less flaky across the matrix.
+      CARGO_HTTP_MULTIPLEXING: "false"
+      CARGO_NET_RETRY: "5"
+      CARGO_HTTP_TIMEOUT: "60"
 
     steps:
       - name: Checkout
@@ -40,6 +47,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: Install protoc (macOS)
         if: startsWith(matrix.platform, 'macos-')
