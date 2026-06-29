@@ -67,6 +67,23 @@ describe("wiki preview store actions", () => {
     expect(index.filesByName.get("new.md")?.[0]?.path).toBe("/project/wiki/new.md")
   })
 
+  it("can update the display tree without replacing the project path index", () => {
+    useWikiStore.getState().setFileTree([
+      { name: "indexed.md", path: "/project/wiki/indexed.md", is_dir: false },
+    ])
+
+    useWikiStore.getState().setFileTree([
+      { name: "display-only.md", path: "/project/wiki/display-only.md", is_dir: false },
+    ], { syncPathIndex: false })
+
+    const state = useWikiStore.getState()
+    expect(state.fileTree[0]?.name).toBe("display-only.md")
+    expect(state.projectPathIndex.filesByName.get("indexed.md")?.[0]?.path).toBe(
+      "/project/wiki/indexed.md",
+    )
+    expect(state.projectPathIndex.filesByName.get("display-only.md")).toBeUndefined()
+  })
+
   it("opens a path in the wiki preview and clears external previews", () => {
     useWikiStore.setState({
       activeView: "chat",

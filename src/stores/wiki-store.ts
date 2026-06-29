@@ -358,7 +358,8 @@ interface WikiState {
   dataVersion: number
 
   setProject: (project: WikiProject | null) => void
-  setFileTree: (tree: FileNode[]) => void
+  setFileTree: (tree: FileNode[], options?: { syncPathIndex?: boolean }) => void
+  setProjectPathIndexFromTree: (tree: FileNode[]) => void
   setSelectedFile: (path: string | null) => void
   setFileContent: (content: string) => void
   openPathInPreview: (path: string) => void
@@ -409,8 +410,15 @@ export const useWikiStore = create<WikiState>((set) => ({
   dataVersion: 0,
 
   setProject: (project) => set({ project }),
-  setFileTree: (fileTree) =>
-    set({ fileTree, projectPathIndex: buildProjectPathIndexFromTree(fileTree) }),
+  setFileTree: (fileTree, options) => {
+    if (options?.syncPathIndex === false) {
+      set({ fileTree })
+      return
+    }
+    set({ fileTree, projectPathIndex: buildProjectPathIndexFromTree(fileTree) })
+  },
+  setProjectPathIndexFromTree: (tree) =>
+    set({ projectPathIndex: buildProjectPathIndexFromTree(tree) }),
   setSelectedFile: (selectedFile) =>
     set({ selectedFile, previewContentPath: null, externalPreview: null }),
   setFileContent: (fileContent) => set({ fileContent }),

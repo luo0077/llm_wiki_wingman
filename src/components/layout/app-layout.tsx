@@ -21,6 +21,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   const activeView = useWikiStore((s) => s.activeView)
   const researchPanelOpen = useResearchStore((s) => s.panelOpen)
   const setFileTree = useWikiStore((s) => s.setFileTree)
+  const setProjectPathIndexFromTree = useWikiStore((s) => s.setProjectPathIndexFromTree)
   const [leftWidth, setLeftWidth] = useState(220)
   const [rightWidth, setRightWidth] = useState(400)
   const isDraggingLeft = useRef(false)
@@ -29,13 +30,25 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
 
   const loadFileTree = useCallback(async () => {
     if (!project) return
+    const projectId = project.id
+    const projectPath = normalizePath(project.path)
     try {
-      const tree = await listDirectory(normalizePath(project.path))
-      setFileTree(tree)
+      const tree = await listDirectory(projectPath, { maxDepth: 2 })
+      if (useWikiStore.getState().project?.id !== projectId) return
+      setFileTree(tree, { syncPathIndex: false })
     } catch (err) {
       console.error("Failed to load file tree:", err)
     }
-  }, [project, setFileTree])
+
+    listDirectory(projectPath)
+      .then((tree) => {
+        if (useWikiStore.getState().project?.id !== projectId) return
+        setProjectPathIndexFromTree(tree)
+      })
+      .catch((err) => {
+        console.error("Failed to build project path index:", err)
+      })
+  }, [project, setFileTree, setProjectPathIndexFromTree])
 
   useEffect(() => {
     loadFileTree()
