@@ -40,11 +40,24 @@ export async function writeFileAtomic(path: string, contents: string): Promise<v
  * only for the `raw/sources` content area, where dotfolders are
  * legitimate user-added sources. See `entry_is_visible` in fs.rs.
  */
+export interface ListDirectoryOptions {
+  includeHidden?: boolean
+  maxDepth?: number
+}
+
 export async function listDirectory(
   path: string,
-  includeHidden = false,
+  includeHiddenOrOptions: boolean | ListDirectoryOptions = false,
 ): Promise<FileNode[]> {
-  return invoke<FileNode[]>("list_directory", { path, includeHidden })
+  const options =
+    typeof includeHiddenOrOptions === "boolean"
+      ? { includeHidden: includeHiddenOrOptions }
+      : includeHiddenOrOptions
+  return invoke<FileNode[]>("list_directory", {
+    path,
+    includeHidden: options.includeHidden,
+    maxDepth: options.maxDepth,
+  })
 }
 
 export async function copyFile(
