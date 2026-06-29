@@ -360,7 +360,7 @@ export function ChatPanel() {
     const pp = normalizePath(project.path)
     try {
       await executeIngestWrites(pp, llmConfig, undefined, undefined)
-      await refreshProjectFileTree(pp)
+      await refreshProjectFileTree(pp, { bumpDataVersion: true })
     } catch (err) {
       console.error("Failed to write to wiki:", err)
     }

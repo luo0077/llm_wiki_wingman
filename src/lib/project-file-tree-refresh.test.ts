@@ -133,6 +133,110 @@ describe("refreshProjectFileTree", () => {
     }
   })
 
+  it("preserves already-loaded display children when refreshing the shallow tree", async () => {
+    const loadedTree: FileNode[] = [
+      {
+        name: "wiki",
+        path: "/tmp/project/wiki",
+        is_dir: true,
+        children: [
+          {
+            name: "entities",
+            path: "/tmp/project/wiki/entities",
+            is_dir: true,
+            children: [
+              {
+                name: "alpha.md",
+                path: "/tmp/project/wiki/entities/alpha.md",
+                is_dir: false,
+              },
+            ],
+          },
+        ],
+      },
+    ]
+    const refreshedShallowTree: FileNode[] = [
+      {
+        name: "wiki",
+        path: "/tmp/project/wiki",
+        is_dir: true,
+        children: [
+          {
+            name: "entities",
+            path: "/tmp/project/wiki/entities",
+            is_dir: true,
+          },
+          {
+            name: "concepts",
+            path: "/tmp/project/wiki/concepts",
+            is_dir: true,
+          },
+        ],
+      },
+    ]
+    useWikiStore.getState().setFileTree(loadedTree, { syncPathIndex: false })
+    mocks.listDirectory.mockImplementation(async (_path: string, options?: { maxDepth?: number }) =>
+      options?.maxDepth === 2 ? refreshedShallowTree : fullTree
+    )
+
+    await refreshProjectFileTree(project.path, {
+      projectId: project.id,
+      refreshPathIndex: false,
+    })
+
+    expect(useWikiStore.getState().fileTree).toEqual([
+      {
+        name: "wiki",
+        path: "/tmp/project/wiki",
+        is_dir: true,
+        children: [
+          {
+            name: "entities",
+            path: "/tmp/project/wiki/entities",
+            is_dir: true,
+            children: [
+              {
+                name: "alpha.md",
+                path: "/tmp/project/wiki/entities/alpha.md",
+                is_dir: false,
+              },
+            ],
+          },
+          {
+            name: "concepts",
+            path: "/tmp/project/wiki/concepts",
+            is_dir: true,
+          },
+        ],
+      },
+    ])
+  })
+
+  it("retries the shallow display tree refresh before showing an empty sidebar", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.listDirectory
+        .mockRejectedValueOnce(new Error("transient list failure"))
+        .mockResolvedValueOnce(shallowTree)
+
+      const pending = refreshProjectFileTree(project.path, {
+        projectId: project.id,
+        refreshPathIndex: false,
+      })
+      await flushMicrotasks()
+      expect(useWikiStore.getState().fileTree).toEqual([])
+
+      await vi.advanceTimersByTimeAsync(250)
+      await pending
+
+      expect(mocks.listDirectory).toHaveBeenNthCalledWith(1, project.path, { maxDepth: 2 })
+      expect(mocks.listDirectory).toHaveBeenNthCalledWith(2, project.path, { maxDepth: 2 })
+      expect(useWikiStore.getState().fileTree).toEqual(shallowTree)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("does not start the background full scan once the shallow refresh reveals a stale project", async () => {
     mocks.listDirectory.mockImplementation(async (_path: string, options?: { maxDepth?: number }) => {
       if (options?.maxDepth === 2) {

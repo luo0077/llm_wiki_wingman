@@ -1,6 +1,7 @@
 import { listDirectory } from "@/commands/fs"
 import { useWikiStore } from "@/stores/wiki-store"
 import { normalizePath } from "@/lib/path-utils"
+import type { FileNode } from "@/types/wiki"
 
 export interface RefreshProjectFileTreeOptions {
   projectId?: string
@@ -36,6 +37,17 @@ function isStillCurrentProject(projectId: string | undefined, projectPath: strin
   return normalizePath(current.path) === projectPath
 }
 
+function mergeLoadedDisplayTree(existing: FileNode[], refreshed: FileNode[]): FileNode[] {
+  const existingByPath = new Map(existing.map((node) => [node.path, node]))
+
+  return refreshed.map((node) => {
+    const prior = existingByPath.get(node.path)
+    if (!prior?.children) return node
+    if (!node.children) return { ...node, children: prior.children }
+    return { ...node, children: mergeLoadedDisplayTree(prior.children, node.children) }
+  })
+}
+
 export async function refreshProjectFileTree(
   projectPath: string,
   options: RefreshProjectFileTreeOptions = {},
@@ -51,9 +63,13 @@ export async function refreshProjectFileTree(
 
   if (refreshDisplayTree) {
     try {
-      const shallowTree = await listDirectory(normalizedProjectPath, { maxDepth: 2 })
+      const shallowTree = await listDirectoryWithRetry(normalizedProjectPath, { maxDepth: 2 }, 3)
       if (isStillCurrentProject(currentProjectId, normalizedProjectPath)) {
-        useWikiStore.getState().setFileTree(shallowTree, { syncPathIndex: false })
+        const currentTree = useWikiStore.getState().fileTree
+        const displayTree = options.clearDisplayTreeFirst
+          ? shallowTree
+          : mergeLoadedDisplayTree(currentTree, shallowTree)
+        useWikiStore.getState().setFileTree(displayTree, { syncPathIndex: false })
       }
     } catch (err) {
       console.error("Failed to refresh project file tree:", err)

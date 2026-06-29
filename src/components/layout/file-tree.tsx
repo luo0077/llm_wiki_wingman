@@ -93,10 +93,12 @@ export function FileTree() {
   const setFileTree = useWikiStore((s) => s.setFileTree)
   const project = useWikiStore((s) => s.project)
   const loadedPaths = useRef(new Set<string>())
+  const loadingPaths = useRef(new Set<string>())
 
   useEffect(() => {
     loadedPaths.current.clear()
-  }, [project?.id, fileTree])
+    loadingPaths.current.clear()
+  }, [project?.id])
 
   const handleOpenProjectFolder = async () => {
     if (!project) return
@@ -121,7 +123,8 @@ export function FileTree() {
 
   const handleLoadChildren = async (node: FileNode) => {
     if (!project) return
-    if (loadedPaths.current.has(node.path)) return
+    if (loadedPaths.current.has(node.path) || loadingPaths.current.has(node.path)) return
+    loadingPaths.current.add(node.path)
     const projectId = project.id
     try {
       const children = await listDirectory(node.path, { maxDepth: 1 })
@@ -135,6 +138,8 @@ export function FileTree() {
       })
     } catch (err) {
       console.error("[FileTree] load children failed:", err)
+    } finally {
+      loadingPaths.current.delete(node.path)
     }
   }
 

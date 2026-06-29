@@ -424,6 +424,7 @@ function App() {
       // Start project source watch if enabled
       import("@/lib/project-file-sync").then(async ({ startProjectFileSync, stopProjectFileSync }) => {
         const config = await loadSourceWatchConfig(proj.id)
+        if (!isCurrentProject(proj)) return
         useWikiStore.getState().setSourceWatchConfig(config)
         if (config.enabled) {
           startProjectFileSync(proj, config).catch((err) =>
