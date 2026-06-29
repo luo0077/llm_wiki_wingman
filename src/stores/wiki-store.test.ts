@@ -84,6 +84,23 @@ describe("wiki preview store actions", () => {
     expect(state.projectPathIndex.filesByName.get("display-only.md")).toBeUndefined()
   })
 
+  it("can rebuild only the project path index from a full tree", () => {
+    useWikiStore.getState().setFileTree([
+      { name: "display.md", path: "/project/wiki/display.md", is_dir: false },
+    ])
+
+    useWikiStore.getState().setProjectPathIndexFromTree([
+      { name: "full.md", path: "/project/wiki/deep/full.md", is_dir: false },
+    ])
+
+    const state = useWikiStore.getState()
+    expect(state.fileTree[0]?.name).toBe("display.md")
+    expect(state.projectPathIndex.filesByName.get("display.md")).toBeUndefined()
+    expect(state.projectPathIndex.filesByName.get("full.md")?.[0]?.path).toBe(
+      "/project/wiki/deep/full.md",
+    )
+  })
+
   it("opens a path in the wiki preview and clears external previews", () => {
     useWikiStore.setState({
       activeView: "chat",

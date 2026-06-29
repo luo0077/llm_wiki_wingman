@@ -16,6 +16,25 @@ interface AppLayoutProps {
   onSwitchProject: () => void
 }
 
+async function loadDirectoryWithRetry(
+  path: string,
+  options: Parameters<typeof listDirectory>[1],
+  attempts = 2,
+): Promise<Awaited<ReturnType<typeof listDirectory>>> {
+  let lastError: unknown
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await listDirectory(path, options)
+    } catch (err) {
+      lastError = err
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+    }
+  }
+  throw lastError
+}
+
 export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   const project = useWikiStore((s) => s.project)
   const activeView = useWikiStore((s) => s.activeView)
@@ -32,15 +51,16 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
     if (!project) return
     const projectId = project.id
     const projectPath = normalizePath(project.path)
+    setFileTree([], { syncPathIndex: false })
     try {
       const tree = await listDirectory(projectPath, { maxDepth: 2 })
       if (useWikiStore.getState().project?.id !== projectId) return
-      setFileTree(tree, { syncPathIndex: false })
+      setFileTree(tree)
     } catch (err) {
       console.error("Failed to load file tree:", err)
     }
 
-    listDirectory(projectPath)
+    loadDirectoryWithRetry(projectPath, undefined, 3)
       .then((tree) => {
         if (useWikiStore.getState().project?.id !== projectId) return
         setProjectPathIndexFromTree(tree)

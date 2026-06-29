@@ -6,16 +6,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 import { useTranslation } from "react-i18next"
 import { listDirectory, openProjectFolder } from "@/commands/fs"
-
-function replaceNodeChildren(nodes: FileNode[], path: string, children: FileNode[]): FileNode[] {
-  return nodes.map((node) => {
-    if (node.path === path) return { ...node, children }
-    if (node.children) {
-      return { ...node, children: replaceNodeChildren(node.children, path, children) }
-    }
-    return node
-  })
-}
+import { replaceNodeChildren } from "./file-tree-utils"
 
 function TreeNode({
   node,
@@ -105,7 +96,7 @@ export function FileTree() {
 
   useEffect(() => {
     loadedPaths.current.clear()
-  }, [project?.id])
+  }, [project?.id, fileTree])
 
   const handleOpenProjectFolder = async () => {
     if (!project) return
@@ -135,9 +126,11 @@ export function FileTree() {
     try {
       const children = await listDirectory(node.path, { maxDepth: 1 })
       if (useWikiStore.getState().project?.id !== projectId) return
-      loadedPaths.current.add(node.path)
       const currentTree = useWikiStore.getState().fileTree
-      setFileTree(replaceNodeChildren(currentTree, node.path, children), {
+      const result = replaceNodeChildren(currentTree, node.path, children)
+      if (!result.matched) return
+      loadedPaths.current.add(node.path)
+      setFileTree(result.nodes, {
         syncPathIndex: false,
       })
     } catch (err) {
