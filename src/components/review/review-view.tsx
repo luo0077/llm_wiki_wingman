@@ -15,8 +15,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { useReviewStore, type ReviewItem } from "@/stores/review-store"
 import { useWikiStore } from "@/stores/wiki-store"
-import { writeFile, readFile, listDirectory, deleteFile } from "@/commands/fs"
+import { writeFile, readFile, deleteFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { hasConfiguredDeepResearchSources } from "@/lib/web-search"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { createReviewPageDrafts } from "@/lib/review-create-page"
@@ -39,7 +40,6 @@ export function ReviewView() {
   const clearResolved = useReviewStore((s) => s.clearResolved)
   const setItems = useReviewStore((s) => s.setItems)
   const project = useWikiStore((s) => s.project)
-  const setFileTree = useWikiStore((s) => s.setFileTree)
   const [refreshing, setRefreshing] = useState(false)
 
   // Reload review items from disk. The review pane has no equivalent of
@@ -116,11 +116,11 @@ export function ReviewView() {
         try { logContent = await readFile(logPath) } catch { logContent = "# Wiki Log\n" }
         await writeFile(logPath, logContent.trimEnd() + `\n- ${date}: Saved query page \`${fileName}\`\n`)
 
-        // Refresh tree
-        const tree = await listDirectory(pp)
-        setFileTree(tree)
+        await refreshProjectFileTree(pp, {
+          projectId: project.id,
+          bumpDataVersion: true,
+        })
         useWikiStore.getState().openFileInPreview(filePath, pageContent)
-        useWikiStore.getState().bumpDataVersion()
 
         resolveItem(id, "Saved to Wiki")
       } catch (err) {
@@ -154,8 +154,10 @@ export function ReviewView() {
       const filePath = action.slice(7)
       try {
         await deleteFile(filePath)
-        const tree = await listDirectory(pp)
-        setFileTree(tree)
+        await refreshProjectFileTree(pp, {
+          projectId: project.id,
+          bumpDataVersion: true,
+        })
         resolveItem(id, "Deleted")
       } catch (err) {
         console.error("Failed to delete:", err)
@@ -237,12 +239,12 @@ export function ReviewView() {
           const logDate = created[0]?.date ?? makeQueryFileName("review").date
           await writeFile(logPath, logContent.trimEnd() + `\n- ${logDate}: Created ${created.length} page${created.length === 1 ? "" : "s"} from review: ${createdNames}\n`)
 
-          // Refresh
-          const tree = await listDirectory(pp)
-          setFileTree(tree)
+          await refreshProjectFileTree(pp, {
+            projectId: project.id,
+            bumpDataVersion: true,
+          })
           const first = created[0]
           if (first) useWikiStore.getState().openFileInPreview(first.filePath, first.pageContent)
-          useWikiStore.getState().bumpDataVersion()
 
           resolveItem(id, created.length === 1
             ? `Created: wiki/${created[0].dir}/${created[0].fileName}`
@@ -257,7 +259,7 @@ export function ReviewView() {
     } else {
       resolveItem(id, action)
     }
-  }, [project, items, resolveItem, setFileTree])
+  }, [project, items, resolveItem])
 
   const pending = items.filter((i) => !i.resolved)
   const resolved = items.filter((i) => i.resolved)

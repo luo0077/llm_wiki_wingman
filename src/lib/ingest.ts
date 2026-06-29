@@ -39,6 +39,7 @@ import { captionMarkdownImages, loadCaptionCache } from "@/lib/image-caption-pip
 import type { MultimodalConfig } from "@/stores/wiki-store"
 import { GENERATION_WIKI_TYPES } from "@/lib/wiki-page-types"
 import { computeContextBudget } from "@/lib/context-budget"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
 const LONG_SOURCE_MAX_SINGLE_PASS_BUDGET = 300_000
@@ -1109,9 +1110,7 @@ async function autoIngestImpl(
 
   if (writtenPaths.length > 0) {
     try {
-      const tree = await listDirectory(pp)
-      useWikiStore.getState().setFileTree(tree)
-      useWikiStore.getState().bumpDataVersion()
+      await refreshProjectFileTree(pp, { bumpDataVersion: true })
     } catch {
       // ignore
     }

@@ -8,6 +8,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { readFile, listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { cascadeDeleteWikiPagesWithRefs } from "@/lib/wiki-page-delete"
 import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
 import { filterRawSourceTree } from "@/lib/source-filter"
@@ -43,8 +44,6 @@ export function KnowledgeTree() {
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const openPathInPreview = useWikiStore((s) => s.openPathInPreview)
   const fileTree = useWikiStore((s) => s.fileTree)
-  const setFileTree = useWikiStore((s) => s.setFileTree)
-  const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const [pages, setPages] = useState<WikiPageInfo[]>([])
   const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(["overview", "entity", "concept", "source"]))
   // Two-stage delete: first click arms the row, second click executes.
@@ -104,12 +103,13 @@ export function KnowledgeTree() {
         // Refresh: page list, file tree, any data-version subscribers.
         await loadPages()
         try {
-          const tree = await listDirectory(pp)
-          setFileTree(tree)
+          await refreshProjectFileTree(pp, {
+            projectId: project.id,
+            bumpDataVersion: true,
+          })
         } catch {
           // non-critical
         }
-        bumpDataVersion()
         if (selectedFile === pagePath) setSelectedFile(null)
       } catch (err) {
         console.error("[KnowledgeTree] delete failed:", err)
@@ -118,7 +118,7 @@ export function KnowledgeTree() {
         setDeletingPath(null)
       }
     },
-    [project, armedPath, loadPages, selectedFile, setSelectedFile, setFileTree, bumpDataVersion],
+    [project, armedPath, loadPages, selectedFile, setSelectedFile],
   )
 
   if (!project) {

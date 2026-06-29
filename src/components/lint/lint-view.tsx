@@ -18,8 +18,9 @@ import { useReviewStore } from "@/stores/review-store"
 import { useLintStore, type LintItem } from "@/stores/lint-store"
 import { runStructuralLint, runSemanticLint } from "@/lib/lint"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
-import { readFile, writeFile, listDirectory } from "@/commands/fs"
+import { readFile, writeFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import {
   appendWikilink,
   ensureBrokenLinkStub,
@@ -54,8 +55,6 @@ export function LintView() {
   const project = useWikiStore((s) => s.project)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const openFileInPreview = useWikiStore((s) => s.openFileInPreview)
-  const setFileTree = useWikiStore((s) => s.setFileTree)
-  const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
 
   // Dynamic type config based on i18n
   const typeConfig = useMemo(() => ({
@@ -212,9 +211,10 @@ export function LintView() {
       }
 
       // Refresh tree
-      const tree = await listDirectory(pp)
-      setFileTree(tree)
-      bumpDataVersion()
+      await refreshProjectFileTree(pp, {
+        projectId: project.id,
+        bumpDataVersion: true,
+      })
     } catch (err) {
       console.error("Fix failed:", err)
       setFixError(err instanceof Error ? err.message : String(err))
@@ -242,9 +242,10 @@ export function LintView() {
       )
       await cascadeDeleteWikiPagesWithRefs(pp, [pagePath])
       useLintStore.getState().removeItem(item.id)
-      const tree = await listDirectory(pp)
-      setFileTree(tree)
-      bumpDataVersion()
+      await refreshProjectFileTree(pp, {
+        projectId: project.id,
+        bumpDataVersion: true,
+      })
     } catch (err) {
       console.error("Delete failed:", err)
     }

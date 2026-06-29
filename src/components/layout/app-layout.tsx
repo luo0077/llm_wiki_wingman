@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
-import { listDirectory } from "@/commands/fs"
-import { normalizePath } from "@/lib/path-utils"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { IconSidebar } from "./icon-sidebar"
 import { UpdateBanner } from "./update-banner"
 import { SidebarPanel } from "./sidebar-panel"
@@ -16,31 +15,10 @@ interface AppLayoutProps {
   onSwitchProject: () => void
 }
 
-async function loadDirectoryWithRetry(
-  path: string,
-  options: Parameters<typeof listDirectory>[1],
-  attempts = 2,
-): Promise<Awaited<ReturnType<typeof listDirectory>>> {
-  let lastError: unknown
-  for (let i = 0; i < attempts; i += 1) {
-    try {
-      return await listDirectory(path, options)
-    } catch (err) {
-      lastError = err
-      if (i < attempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250))
-      }
-    }
-  }
-  throw lastError
-}
-
 export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   const project = useWikiStore((s) => s.project)
   const activeView = useWikiStore((s) => s.activeView)
   const researchPanelOpen = useResearchStore((s) => s.panelOpen)
-  const setFileTree = useWikiStore((s) => s.setFileTree)
-  const setProjectPathIndexFromTree = useWikiStore((s) => s.setProjectPathIndexFromTree)
   const [leftWidth, setLeftWidth] = useState(220)
   const [rightWidth, setRightWidth] = useState(400)
   const isDraggingLeft = useRef(false)
@@ -49,26 +27,11 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
 
   const loadFileTree = useCallback(async () => {
     if (!project) return
-    const projectId = project.id
-    const projectPath = normalizePath(project.path)
-    setFileTree([], { syncPathIndex: false })
-    try {
-      const tree = await listDirectory(projectPath, { maxDepth: 2 })
-      if (useWikiStore.getState().project?.id !== projectId) return
-      setFileTree(tree)
-    } catch (err) {
-      console.error("Failed to load file tree:", err)
-    }
-
-    loadDirectoryWithRetry(projectPath, undefined, 3)
-      .then((tree) => {
-        if (useWikiStore.getState().project?.id !== projectId) return
-        setProjectPathIndexFromTree(tree)
-      })
-      .catch((err) => {
-        console.error("Failed to build project path index:", err)
-      })
-  }, [project, setFileTree, setProjectPathIndexFromTree])
+    await refreshProjectFileTree(project.path, {
+      projectId: project.id,
+      clearDisplayTreeFirst: true,
+    })
+  }, [project])
 
   useEffect(() => {
     loadFileTree()
