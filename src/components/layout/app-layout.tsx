@@ -114,10 +114,13 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
           )}
 
           {/* Center: Chat, wiki preview, or tool view */}
-          <div className="min-w-0 flex-1 overflow-hidden">
-            <ErrorBoundary>
-              <ContentArea />
-            </ErrorBoundary>
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ErrorBoundary>
+                <ContentArea />
+              </ErrorBoundary>
+            </div>
+            {!showLeftPanel && <ActivityPanel />}
           </div>
 
           {/* Right panels */}
