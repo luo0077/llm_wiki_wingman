@@ -528,6 +528,8 @@
         "openHealthHint": "在系统浏览器中打开。/health 是唯一不需要 token 的接口。",
         "allowUnauthenticated": "允许无 token 访问",
         "allowUnauthenticatedHint": "仅用于可信的本地智能体。启用后，这台机器上的任何进程或浏览器页面都可以调用 API。",
+        "allowLanAccess": "允许 API 和 Clip server 局域网访问",
+        "allowLanAccessHint": "重启应用后，API 和 Clip server 会监听 0.0.0.0，而不是 127.0.0.1。仅在可信网络中使用，除非完全信任局域网，否则请保留 token 鉴权。",
         "mcpEnable": "启用 MCP 访问",
         "mcpEnableHint": "MCP 复用本地 API 和同一套 token 规则。保持 HTTP API 启用后，将 MCP 客户端连接到内置 Node 服务即可。",
         "mcpUsage": "MCP 使用说明",

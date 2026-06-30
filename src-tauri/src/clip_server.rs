@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::thread;
+use tauri::AppHandle;
 use tiny_http::{Header, Method, Response, Server};
 
 use crate::cors::{local_cors_headers, request_origin};
@@ -43,14 +44,14 @@ pub fn all_projects() -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-pub fn start_clip_server() {
-    thread::spawn(|| {
+pub fn start_clip_server(app: AppHandle) {
+    thread::spawn(move || {
         let mut restart_count: u32 = 0;
 
         loop {
             // Try to bind the port with retries
-            let server = {
-                let host = server_bind::configured_bind_host();
+            let (server, addr) = {
+                let host = server_bind::configured_bind_host(&app);
                 let addr = server_bind::bind_addr(&host, PORT);
                 let mut last_err = String::new();
                 let mut bound = None;
@@ -75,7 +76,7 @@ pub fn start_clip_server() {
                     }
                 }
                 match bound {
-                    Some(s) => s,
+                    Some(s) => (s, addr),
                     None => {
                         eprintln!(
                             "[Clip Server] Address {} unavailable after {} attempts: {}",
@@ -89,7 +90,6 @@ pub fn start_clip_server() {
 
             DAEMON_STATUS.store(1, Ordering::Relaxed); // running
             restart_count = 0; // Reset on successful bind
-            let addr = server_bind::bind_addr(&server_bind::configured_bind_host(), PORT);
             println!("[Clip Server] Listening on http://{}", addr);
 
             for mut request in server.incoming_requests() {

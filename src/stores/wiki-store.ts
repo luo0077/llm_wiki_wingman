@@ -197,6 +197,8 @@ interface ScheduledImportConfig {
  *     env-token-only setup keeps working after the toggle is added.
  *   - `allowUnauthenticated` lets local agents call the API without a
  *     token. It is explicit and default-off.
+ *   - `allowLanAccess` binds the API and clip server to 0.0.0.0 on
+ *     app startup so trusted LAN devices can reach them. Default-off.
  *   - `mcpEnabled` allows the optional MCP stdio server to use this
  *     API. It is separate from the HTTP API kill-switch so users can
  *     expose scripts while keeping MCP disabled.
@@ -207,6 +209,7 @@ interface ScheduledImportConfig {
 interface ApiConfig {
   enabled: boolean
   allowUnauthenticated: boolean
+  allowLanAccess: boolean
   mcpEnabled: boolean
   token: string
 }
@@ -529,6 +532,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   apiConfig: {
     enabled: true,
     allowUnauthenticated: false,
+    allowLanAccess: false,
     mcpEnabled: false,
     token: "",
   },
