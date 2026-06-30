@@ -14,7 +14,7 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 use walkdir::WalkDir;
 
 use crate::cors::{local_cors_headers, request_origin};
-use crate::{clip_server, commands};
+use crate::{clip_server, commands, server_bind};
 
 const PORT: u16 = 19828;
 const API_PREFIX: &str = "/api/v1";
@@ -74,7 +74,8 @@ pub fn start_api_server(app: AppHandle) {
         };
 
         API_STATUS.store(1, Ordering::Relaxed);
-        eprintln!("[API Server] Listening on http://127.0.0.1:{PORT}{API_PREFIX}");
+        let addr = server_bind::bind_addr(&server_bind::configured_bind_host(), PORT);
+        eprintln!("[API Server] Listening on http://{addr}{API_PREFIX}");
 
         for request in server.incoming_requests() {
             let method = request.method().clone();
@@ -107,12 +108,14 @@ pub fn start_api_server(app: AppHandle) {
 }
 
 fn bind_server_with_retry() -> Option<Server> {
+    let host = server_bind::configured_bind_host();
+    let addr = server_bind::bind_addr(&host, PORT);
     for attempt in 1..=MAX_BIND_RETRIES {
-        match Server::http(format!("127.0.0.1:{PORT}")) {
+        match Server::http(&addr) {
             Ok(server) => return Some(server),
             Err(err) => {
                 eprintln!(
-                    "[API Server] Failed to bind 127.0.0.1:{PORT} (attempt {attempt}/{MAX_BIND_RETRIES}): {err}"
+                    "[API Server] Failed to bind {addr} (attempt {attempt}/{MAX_BIND_RETRIES}): {err}"
                 );
                 if attempt < MAX_BIND_RETRIES {
                     thread::sleep(Duration::from_secs(BIND_RETRY_DELAY_SECS));

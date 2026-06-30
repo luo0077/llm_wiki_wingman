@@ -4,6 +4,7 @@ use std::thread;
 use tiny_http::{Header, Method, Response, Server};
 
 use crate::cors::{local_cors_headers, request_origin};
+use crate::server_bind;
 
 static CURRENT_PROJECT: Mutex<String> = Mutex::new(String::new());
 static ALL_PROJECTS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new()); // (name, path)
@@ -49,10 +50,12 @@ pub fn start_clip_server() {
         loop {
             // Try to bind the port with retries
             let server = {
+                let host = server_bind::configured_bind_host();
+                let addr = server_bind::bind_addr(&host, PORT);
                 let mut last_err = String::new();
                 let mut bound = None;
                 for attempt in 1..=MAX_BIND_RETRIES {
-                    match Server::http(format!("127.0.0.1:{}", PORT)) {
+                    match Server::http(&addr) {
                         Ok(s) => {
                             bound = Some(s);
                             break;
@@ -60,8 +63,8 @@ pub fn start_clip_server() {
                         Err(e) => {
                             last_err = format!("{}", e);
                             eprintln!(
-                                "[Clip Server] Bind attempt {}/{} failed: {}",
-                                attempt, MAX_BIND_RETRIES, e
+                                "[Clip Server] Bind attempt {}/{} failed for {}: {}",
+                                attempt, MAX_BIND_RETRIES, addr, e
                             );
                             if attempt < MAX_BIND_RETRIES {
                                 thread::sleep(std::time::Duration::from_secs(
@@ -75,8 +78,8 @@ pub fn start_clip_server() {
                     Some(s) => s,
                     None => {
                         eprintln!(
-                            "[Clip Server] Port {} unavailable after {} attempts: {}",
-                            PORT, MAX_BIND_RETRIES, last_err
+                            "[Clip Server] Address {} unavailable after {} attempts: {}",
+                            addr, MAX_BIND_RETRIES, last_err
                         );
                         DAEMON_STATUS.store(2, Ordering::Relaxed); // port_conflict
                         return; // Don't retry on port conflict — needs user action
@@ -86,7 +89,8 @@ pub fn start_clip_server() {
 
             DAEMON_STATUS.store(1, Ordering::Relaxed); // running
             restart_count = 0; // Reset on successful bind
-            println!("[Clip Server] Listening on http://127.0.0.1:{}", PORT);
+            let addr = server_bind::bind_addr(&server_bind::configured_bind_host(), PORT);
+            println!("[Clip Server] Listening on http://{}", addr);
 
             for mut request in server.incoming_requests() {
                 let origin = request_origin(&request);

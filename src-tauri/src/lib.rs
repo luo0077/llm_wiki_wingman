@@ -4,6 +4,7 @@ mod commands;
 mod cors;
 mod panic_guard;
 mod proxy;
+mod server_bind;
 mod tray;
 mod types;
 
