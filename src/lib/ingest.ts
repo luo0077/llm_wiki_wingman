@@ -589,6 +589,39 @@ function throwIfIngestAborted(signal: AbortSignal | undefined, activityId?: stri
   throw new Error("Ingest cancelled")
 }
 
+export function formatIngestWarningLogEntry(
+  sourceIdentity: string,
+  warnings: readonly string[],
+  at = new Date(),
+): string {
+  return [
+    `## ${at.toISOString()} | ${sourceIdentity}`,
+    "",
+    ...warnings.map((warning, index) => `${index + 1}. ${warning}`),
+    "",
+  ].join("\n")
+}
+
+async function appendIngestWarningLog(
+  projectPath: string,
+  sourceIdentity: string,
+  warnings: readonly string[],
+): Promise<void> {
+  if (warnings.length === 0) return
+  const logPath = `${projectPath}/.llm-wiki/ingest-warnings.log`
+  try {
+    await createDirectory(`${projectPath}/.llm-wiki`)
+    const existing = await tryReadFile(logPath)
+    const next = `${existing.trimEnd()}${existing.trim() ? "\n\n" : ""}${formatIngestWarningLogEntry(sourceIdentity, warnings).trimEnd()}\n`
+    await writeFile(logPath, next)
+  } catch (err) {
+    console.warn(
+      `[ingest] Failed to write ingest warning log for "${sourceIdentity}":`,
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
 async function autoIngestImpl(
   projectPath: string,
   sourcePath: string,
@@ -1163,12 +1196,14 @@ async function autoIngestImpl(
   // Surface parser / writer warnings to the activity panel so users
   // don't have to open devtools to find out a block was dropped.
   // Keeping the base "Writing files..." detail on top and appending the
-  // first few warnings; full list stays in the console.
+  // first few warnings; full list is also persisted to .llm-wiki.
+  let warningSummary = ""
   if (writeWarnings.length > 0) {
-    const summary = writeWarnings.length === 1
+    await appendIngestWarningLog(pp, sourceIdentity, writeWarnings)
+    warningSummary = writeWarnings.length === 1
       ? writeWarnings[0]
-      : `${writeWarnings.length} ingest warnings: ${writeWarnings.slice(0, 2).join(" · ")}${writeWarnings.length > 2 ? ` … (+${writeWarnings.length - 2} more in console)` : ""}`
-    activity.updateItem(activityId, { detail: summary })
+      : `${writeWarnings.length} ingest warnings: ${writeWarnings.slice(0, 2).join(" · ")}${writeWarnings.length > 2 ? ` … (+${writeWarnings.length - 2} more in .llm-wiki/ingest-warnings.log)` : ""}`
+    activity.updateItem(activityId, { detail: `${warningSummary} — saved to .llm-wiki/ingest-warnings.log` })
   }
 
   // Ensure source summary page exists (LLM may not have generated it correctly)
@@ -1277,9 +1312,12 @@ async function autoIngestImpl(
     }
   }
 
-  const detail = writtenPaths.length > 0
+  const baseDetail = writtenPaths.length > 0
     ? `${writtenPaths.length} files written${reviewItems.length > 0 ? `, ${reviewItems.length} review item(s)` : ""}`
     : "No files generated"
+  const detail = warningSummary
+    ? `${baseDetail} — ${warningSummary} (saved to .llm-wiki/ingest-warnings.log)`
+    : baseDetail
 
   activity.updateItem(activityId, {
     status: writtenPaths.length > 0 ? "done" : "error",
