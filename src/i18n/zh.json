@@ -712,6 +712,8 @@
     "quickFilters": "快速过滤",
     "hideIndexOverview": "隐藏索引/概述/日志",
     "hideIsolated": "隐藏孤立节点",
+    "minLinks": "最小链接数",
+    "minLinksHint": "隐藏链接数低于此值的节点",
     "maxLinks": "最大链接数",
     "maxLinksHint": "隐藏链接数超过此值的节点",
     "displayTuning": "显示调节",

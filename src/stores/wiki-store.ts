@@ -6,6 +6,7 @@ import {
   createEmptyProjectPathIndex,
   type ProjectPathIndex,
 } from "@/lib/wiki-page-resolver"
+import { DEFAULT_GRAPH_FILTERS, type GraphFilterState } from "@/lib/graph-filters"
 
 /**
  * Wire protocol used when `provider === "custom"`. Other providers have a
@@ -212,6 +213,28 @@ interface ApiConfig {
 
 export type CloseBehavior = "ask" | "minimize" | "exit"
 
+export type GraphColorMode = "type" | "community"
+
+export interface GraphUiState {
+  colorMode: GraphColorMode
+  filters: GraphFilterState
+  nodeScale: number
+  graphSpacingDraft: number
+}
+
+export function createDefaultGraphUiState(): GraphUiState {
+  return {
+    colorMode: "type",
+    filters: {
+      ...DEFAULT_GRAPH_FILTERS,
+      hiddenTypes: new Set(),
+      hiddenNodeIds: new Set(),
+    },
+    nodeScale: 1,
+    graphSpacingDraft: 1,
+  }
+}
+
 export interface GeneralConfig {
   autostart: boolean
   closeBehavior: CloseBehavior
@@ -355,6 +378,7 @@ interface WikiState {
   mineruConfig: MineruConfig
   apiConfig: ApiConfig
   generalConfig: GeneralConfig
+  graphUiState: GraphUiState
   dataVersion: number
 
   setProject: (project: WikiProject | null) => void
@@ -380,6 +404,8 @@ interface WikiState {
   setMineruConfig: (config: MineruConfig) => void
   setApiConfig: (config: ApiConfig) => void
   setGeneralConfig: (config: GeneralConfig) => void
+  setGraphUiState: (state: GraphUiState | ((current: GraphUiState) => GraphUiState)) => void
+  resetGraphUiState: () => void
   bumpDataVersion: () => void
 }
 
@@ -512,6 +538,8 @@ export const useWikiStore = create<WikiState>((set) => ({
     closeBehavior: "minimize",
   },
 
+  graphUiState: createDefaultGraphUiState(),
+
   setLlmConfig: (llmConfig) => set({ llmConfig }),
   setProviderConfigs: (providerConfigs) => set({ providerConfigs }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
@@ -525,6 +553,13 @@ export const useWikiStore = create<WikiState>((set) => ({
   setMineruConfig: (mineruConfig) => set({ mineruConfig }),
   setApiConfig: (apiConfig) => set({ apiConfig }),
   setGeneralConfig: (generalConfig) => set({ generalConfig }),
+  setGraphUiState: (graphUiState) =>
+    set((state) => ({
+      graphUiState: typeof graphUiState === "function"
+        ? graphUiState(state.graphUiState)
+        : graphUiState,
+    })),
+  resetGraphUiState: () => set({ graphUiState: createDefaultGraphUiState() }),
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 }))
 

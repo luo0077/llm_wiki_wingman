@@ -712,6 +712,8 @@
     "quickFilters": "Quick filters",
     "hideIndexOverview": "Hide index / overview / log",
     "hideIsolated": "Hide isolated nodes",
+    "minLinks": "Min links",
+    "minLinksHint": "Hide nodes below this link count",
     "maxLinks": "Max links",
     "maxLinksHint": "Hide nodes above this link count",
     "displayTuning": "Display tuning",
