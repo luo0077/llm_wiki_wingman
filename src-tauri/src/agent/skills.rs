@@ -65,6 +65,7 @@ fn normalize_skill_name(value: &str) -> Option<String> {
         || trimmed.contains('/')
         || trimmed.contains('\\')
         || trimmed.contains("..")
+        || !is_portable_skill_name(trimmed)
     {
         return None;
     }
@@ -73,8 +74,9 @@ fn normalize_skill_name(value: &str) -> Option<String> {
 
 fn split_frontmatter(raw: &str) -> (Option<String>, String) {
     let normalized = raw.strip_prefix('\u{feff}').unwrap_or(raw);
+    let normalized = normalized.replace("\r\n", "\n").replace('\r', "\n");
     if !normalized.starts_with("---\n") {
-        return (None, normalized.to_string());
+        return (None, normalized);
     }
     let rest = &normalized[4..];
     if let Some(end) = rest.find("\n---") {
@@ -85,8 +87,48 @@ fn split_frontmatter(raw: &str) -> (Option<String>, String) {
             .to_string();
         (Some(fm), after)
     } else {
-        (None, normalized.to_string())
+        (None, normalized)
     }
+}
+
+fn is_portable_skill_name(value: &str) -> bool {
+    if value
+        .chars()
+        .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') || ch <= '\u{1f}')
+    {
+        return false;
+    }
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    !matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
 }
 
 fn yaml_string_field(frontmatter: &str, key: &str) -> Option<String> {
@@ -136,8 +178,33 @@ mod tests {
     }
 
     #[test]
+    fn load_project_skills_reads_crlf_frontmatter() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-skills-{}", Uuid::new_v4()));
+        let skills_dir = root.join(".llm-wiki").join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::write(
+            skills_dir.join("reviewer.md"),
+            "---\r\nname: reviewer\r\ndescription: Review source quality\r\n---\r\nCheck claims carefully.",
+        )
+        .unwrap();
+
+        let skills = load_project_skills(root.to_str().unwrap(), &["reviewer".to_string()]);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "reviewer");
+        assert_eq!(skills[0].description, "Review source quality");
+        assert_eq!(skills[0].instructions, "Check claims carefully.");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn load_project_skills_rejects_path_traversal_names() {
         let skills = load_project_skills("/tmp/missing", &["../secret".to_string()]);
+        assert!(skills.is_empty());
+    }
+
+    #[test]
+    fn load_project_skills_rejects_windows_reserved_names() {
+        let skills = load_project_skills("/tmp/missing", &["con".to_string(), "a:b".to_string()]);
         assert!(skills.is_empty());
     }
 }

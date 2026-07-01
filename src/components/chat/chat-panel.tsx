@@ -219,6 +219,8 @@ function normalizeBackendToolName(tool: string) {
   const normalized = tool.split(".").join("_")
   if (normalized === "wiki_search") return "wiki_search" as const
   if (normalized === "wiki_read_page") return "project_file_read" as const
+  if (normalized === "wiki_write_page") return "project_files" as const
+  if (normalized === "skills_load") return "project_file_read" as const
   if (normalized === "source_search") return "project_file_read" as const
   if (normalized === "graph_search") return "graph_search" as const
   if (normalized === "web_search") return "web_search" as const
