@@ -2,7 +2,7 @@ import { writeFile, readFile, createDirectory } from "@/commands/fs"
 import { normalizeReviewItems, type ReviewItem } from "@/stores/review-store"
 import type { LintItem } from "@/stores/lint-store"
 import type { DisplayMessage, Conversation } from "@/stores/chat-store"
-import type { ChatAgentMode } from "@/lib/chat-agent"
+import type { ChatAgentMode } from "@/lib/chat-agent-types"
 import { normalizePath } from "@/lib/path-utils"
 
 async function ensureDir(projectPath: string): Promise<void> {

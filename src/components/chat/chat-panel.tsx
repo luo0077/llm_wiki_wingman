@@ -1,5 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { BookOpen, Plus, Trash2, MessageSquare, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatMessage, StreamingMessage, useSourceFiles, type ChatReferencePreview } from "./chat-message"
@@ -12,13 +14,51 @@ import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile } from "@/commands/fs"
 import { getFileName, normalizePath } from "@/lib/path-utils"
 import { hasConfiguredAnyTxt } from "@/lib/anytxt-search"
-import { buildChatAgentMessages, type ChatAgentEvent } from "@/lib/chat-agent"
+import type { ChatAgentEvent } from "@/lib/chat-agent-types"
+import type { ChatMessage as LlmChatMessage, ContentBlock } from "@/lib/llm-client"
 import { FilePreview } from "@/components/editor/file-preview"
 import { WikiReader } from "@/components/editor/wiki-reader"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { getFileCategory } from "@/lib/file-types"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+
+interface BackendAgentReference {
+  title: string
+  path: string
+  kind: string
+  snippet?: string
+  score?: number
+}
+
+interface BackendAgentToolEvent {
+  tool: string
+  status: string
+  detail?: string
+}
+
+interface BackendAgentEventPayload {
+  sessionId: string
+  runId?: string
+  event: {
+    type: string
+    text?: string
+    tool?: string
+    input?: string
+    output?: string
+    message?: string
+    reference?: BackendAgentReference
+    sessionId?: string
+  }
+}
+
+interface BackendAgentResponse {
+  sessionId: string
+  mode?: string
+  message: string | { role?: string; content?: string }
+  references?: BackendAgentReference[]
+  toolEvents?: BackendAgentToolEvent[]
+}
 
 // Store the page mapping from the last query so SourceFilesBar can show which pages were cited
 export let lastQueryPages: { title: string; path: string }[] = []
@@ -124,6 +164,111 @@ function ConversationSidebar() {
   )
 }
 
+function backendReferenceToMessageReference(ref: BackendAgentReference): MessageReference {
+  const isWiki = ref.kind === "wiki" || ref.path.startsWith("wiki/")
+  const isWeb = ref.kind === "web" || /^https?:\/\//i.test(ref.path)
+  const source =
+    ref.kind === "anytxt" ? "AnyTXT"
+      : ref.kind === "web" ? "Web"
+        : ref.kind === "source" ? "Source"
+          : ref.kind === "graph" ? "Graph"
+            : undefined
+  return {
+    title: ref.title,
+    path: ref.path,
+    kind: isWiki ? "wiki" : "external",
+    source,
+    url: isWeb ? ref.path : undefined,
+    snippet: ref.snippet,
+  }
+}
+
+function backendToolToAgentStep(event: BackendAgentToolEvent, index: number) {
+  if (event.tool === "agent.plan_tools") {
+    return {
+      id: `backend-${index}-${event.tool}-${event.status}`,
+      type: "routing" as const,
+      message: event.detail ?? event.tool,
+      status: event.status === "failed" ? "error" as const : "success" as const,
+    }
+  }
+  if (event.tool === "llm.generate") {
+    return {
+      id: `backend-${index}-${event.tool}-${event.status}`,
+      type: "final" as const,
+      message: event.detail ?? event.tool,
+      status: event.status === "failed" ? "error" as const
+        : event.status === "started" ? "running" as const
+          : "success" as const,
+    }
+  }
+  const tool = normalizeBackendToolName(event.tool)
+  return {
+    id: `backend-${index}-${event.tool}-${event.status}`,
+    type: event.status === "started" ? "tool_call" as const : "tool_result" as const,
+    tool,
+    message: event.detail ?? event.tool,
+    status: event.status === "failed" ? "error" as const
+      : event.status === "available" ? "skipped" as const
+        : event.status === "started" ? "running" as const
+          : "success" as const,
+  }
+}
+
+function normalizeBackendToolName(tool: string) {
+  const normalized = tool.split(".").join("_")
+  if (normalized === "wiki_search") return "wiki_search" as const
+  if (normalized === "wiki_read_page") return "project_file_read" as const
+  if (normalized === "source_search") return "project_file_read" as const
+  if (normalized === "graph_search") return "graph_search" as const
+  if (normalized === "web_search") return "web_search" as const
+  if (normalized === "anytxt_search") return "anytxt_search" as const
+  if (normalized === "deep_research_run") return "project_file_read" as const
+  return "unknown_tool" as const
+}
+
+function backendToolToAgentEvent(event: BackendAgentToolEvent): ChatAgentEvent {
+  if (event.tool === "agent.plan_tools") {
+    return {
+      stage: "routing",
+      message: event.detail ?? event.tool,
+      status: event.status === "failed" ? "error" : "success",
+    }
+  }
+  if (event.tool === "llm.generate") {
+    return {
+      stage: "writing",
+      message: event.detail ?? event.tool,
+      status: event.status === "failed" ? "error"
+        : event.status === "started" ? "running"
+          : "success",
+    }
+  }
+  const tool = normalizeBackendToolName(event.tool)
+  const stage =
+    tool === "web_search" ? "searching_web"
+      : tool === "anytxt_search" ? "searching_anytxt"
+        : tool === "graph_search" ? "searching_graph"
+          : tool === "project_file_read" ? "reading_context"
+            : tool === "wiki_search" ? "searching_wiki"
+              : event.status === "started" ? "tool_call"
+                : "tool_result"
+  return {
+    stage,
+    tool,
+    message: event.detail ?? event.tool,
+    status: event.status === "failed" ? "error"
+      : event.status === "started" ? "running"
+        : event.status === "available" ? "skipped"
+          : "success",
+  }
+}
+
+function backendResponseText(response: BackendAgentResponse): string {
+  if (typeof response.message === "string") return response.message
+  return response.message?.content ?? ""
+}
+
 export function ChatPanel() {
   const { t } = useTranslation()
   useSourceFiles() // Keep source file cache warm
@@ -158,6 +303,8 @@ export function ChatPanel() {
   const imageInputAvailable = supportsImageInput(llmConfig)
 
   const abortRef = useRef<AbortController | null>(null)
+  const activeRunSessionIdRef = useRef<string | null>(null)
+  const activeRunIdRef = useRef<string | null>(null)
   const runIdRef = useRef(0)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -203,34 +350,224 @@ export function ChatPanel() {
       setAgentEvents([])
       let finalized = false
       const runId = ++runIdRef.current
+      const backendRunId = `ui-${Date.now()}-${runId}`
 
       try {
         const controller = new AbortController()
         abortRef.current = controller
+        activeRunSessionIdRef.current = convId
+        activeRunIdRef.current = backendRunId
         const isCurrentRun = () => runIdRef.current === runId && !controller.signal.aborted
+
+        const useBackendAgent =
+          llmConfig.provider !== "claude-code" &&
+          llmConfig.provider !== "codex-cli"
+
+        if (useBackendAgent) {
+          setAgentEvents([
+            {
+              stage: "routing",
+              status: "running",
+              message: t("chat.agent.routing"),
+            },
+          ])
+          const activeConvMessages = useChatStore.getState().getActiveMessages()
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .slice(0, -1)
+            .slice(-maxHistoryMessages)
+            .map((m) => ({ role: m.role, content: m.content }))
+          let accumulated = ""
+          const references: MessageReference[] = []
+          const backendEvents: BackendAgentToolEvent[] = []
+          const seenRefs = new Set<string>()
+          let streamFinished = false
+          let streamUnlisten: (() => void) | null = null
+          let resolveStream: (() => void) | null = null
+          let rejectStream: ((err: Error) => void) | null = null
+          const streamDone = new Promise<void>((resolve, reject) => {
+            resolveStream = resolve
+            rejectStream = reject
+          })
+          void streamDone.catch(() => {})
+          const timeout = window.setTimeout(() => {
+            if (!streamFinished) {
+              streamFinished = true
+              rejectStream?.(new Error("Agent stream timed out"))
+            }
+          }, 240_000)
+          streamUnlisten = await listen<BackendAgentEventPayload>("agent-event", (event) => {
+            const payload = event.payload
+            if (payload.sessionId !== convId || payload.runId !== backendRunId || !isCurrentRun()) return
+            const agentEvent = payload.event
+            if (agentEvent.type === "done") {
+              if (!streamFinished) {
+                streamFinished = true
+                window.clearTimeout(timeout)
+                resolveStream?.()
+              }
+              return
+            }
+            if (agentEvent.type === "messageDelta" && agentEvent.text) {
+              accumulated += agentEvent.text
+              appendStreamToken(agentEvent.text)
+              return
+            }
+            if (agentEvent.type === "referenceAdded" && agentEvent.reference) {
+              const ref = backendReferenceToMessageReference(agentEvent.reference)
+              const key = `${ref.kind ?? "wiki"}:${ref.url ?? ref.path}`.toLowerCase()
+              if (!seenRefs.has(key)) {
+                seenRefs.add(key)
+                references.push(ref)
+              }
+              return
+            }
+            if (agentEvent.type === "toolStart" && agentEvent.tool) {
+              const toolEvent: BackendAgentToolEvent = {
+                tool: agentEvent.tool,
+                status: "started",
+                detail: agentEvent.input,
+              }
+              backendEvents.push(toolEvent)
+              setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
+              return
+            }
+            if (agentEvent.type === "toolEnd" && agentEvent.tool) {
+              const failed = typeof agentEvent.output === "string" && agentEvent.output.startsWith("failed:")
+              const toolEvent: BackendAgentToolEvent = {
+                tool: agentEvent.tool,
+                status: failed ? "failed" : "completed",
+                detail: agentEvent.output,
+              }
+              backendEvents.push(toolEvent)
+              setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
+              return
+            }
+            if (agentEvent.type === "error" && agentEvent.message) {
+              const toolEvent: BackendAgentToolEvent = {
+                tool: "agent",
+                status: "failed",
+                detail: agentEvent.message,
+              }
+              backendEvents.push(toolEvent)
+              setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
+              if (!streamFinished) {
+                streamFinished = true
+                window.clearTimeout(timeout)
+                rejectStream?.(new Error(agentEvent.message))
+              }
+            }
+          })
+          try {
+            await invoke<string>("agent_start_turn_stream", {
+              projectId: project?.id ?? "current",
+              request: {
+                message: text,
+                sessionId: convId,
+                runId: backendRunId,
+                mode: sendOptions.agentMode,
+                stream: true,
+                tools: {
+                  wiki: true,
+                  web: sendOptions.useWebSearch,
+                  anytxt: sendOptions.useAnyTxtSearch,
+                },
+                topK: sendOptions.agentMode === "deep" ? 8 : 5,
+                includeContent: sendOptions.agentMode === "deep",
+                history: activeConvMessages,
+                images: images.map((image) => ({
+                  mediaType: image.mediaType,
+                  dataBase64: image.dataBase64,
+                })),
+              },
+            })
+            await streamDone
+          } finally {
+            window.clearTimeout(timeout)
+            streamUnlisten?.()
+          }
+          if (!isCurrentRun()) return
+          lastQueryPages = references
+            .filter((ref) => ref.kind === "wiki")
+            .map((ref) => ({ title: ref.title, path: ref.path }))
+          const steps = backendEvents.map(backendToolToAgentStep)
+          finalized = true
+          finalizeStream(accumulated, references, steps)
+          setAgentEvents([])
+          abortRef.current = null
+          activeRunSessionIdRef.current = null
+          activeRunIdRef.current = null
+          return
+        }
 
         const activeConvMessages = useChatStore.getState().getActiveMessages()
           .filter((m) => m.role === "user" || m.role === "assistant")
           .slice(-maxHistoryMessages)
-        const historyMessages = chatMessagesToLLM(activeConvMessages)
-        const retrievalHistory = collectRecentRetrievalHistory(activeConvMessages)
-        const agentResult = await buildChatAgentMessages({
-          project: project ? { name: project.name, path: project.path } : null,
-          llmConfig,
-          searchApiConfig,
-          text,
-          historyMessages,
-          retrievalHistory,
-          dataVersion: useWikiStore.getState().dataVersion,
-          options: sendOptions,
-          signal: controller.signal,
-          onEvent: (event) => {
-            if (!isCurrentRun()) return
-            setAgentEvents((prev) => [...prev, event].slice(-6))
+        const priorMessages = activeConvMessages.slice(0, -1)
+        const backendResponse = await invoke<BackendAgentResponse>("agent_start_turn", {
+          projectId: project?.id ?? "current",
+          request: {
+            message: text,
+            sessionId: convId,
+            runId: backendRunId,
+            persistSession: false,
+            mode: sendOptions.agentMode,
+            tools: {
+              wiki: true,
+              web: sendOptions.useWebSearch,
+              anytxt: sendOptions.useAnyTxtSearch,
+            },
+            topK: sendOptions.agentMode === "deep" ? 8 : 5,
+            includeContent: sendOptions.agentMode === "deep",
+            history: chatMessagesToLLM(priorMessages).map((m) => ({
+              role: m.role,
+              content: typeof m.content === "string"
+                ? m.content
+                : m.content
+                    .filter((block) => block.type === "text")
+                    .map((block) => block.text)
+                    .join("\n"),
+            })),
+            images: images.map((image) => ({
+              mediaType: image.mediaType,
+              dataBase64: image.dataBase64,
+            })),
           },
         })
         if (!isCurrentRun()) return
-        lastQueryPages = agentResult.queryPages
+
+        const backendReferences = (backendResponse.references ?? []).map(backendReferenceToMessageReference)
+        const backendSteps = (backendResponse.toolEvents ?? []).map(backendToolToAgentStep)
+        const backendEvents = (backendResponse.toolEvents ?? []).map(backendToolToAgentEvent)
+        setAgentEvents(backendEvents.slice(-6))
+        lastQueryPages = backendReferences
+          .filter((ref) => ref.kind === "wiki")
+          .map((ref) => ({ title: ref.title, path: ref.path }))
+
+        const contextText = [
+          "You have access to the current LLM Wiki project context below. Use it as retrieved evidence when it is relevant.",
+          "",
+          backendResponseText(backendResponse),
+          "",
+          `User request: ${text}`,
+        ].join("\n")
+        const userContent: string | ContentBlock[] = images.length > 0
+          ? [
+              { type: "text", text: contextText },
+              ...images.map((image) => ({
+                type: "image" as const,
+                mediaType: image.mediaType,
+                dataBase64: image.dataBase64,
+              })),
+            ]
+          : contextText
+        const finalMessages: LlmChatMessage[] = [
+          {
+            role: "system",
+            content: "Answer using the provided LLM Wiki context and references. If the context is insufficient, say what is missing instead of inventing details.",
+          },
+          ...chatMessagesToLLM(priorMessages),
+          { role: "user", content: userContent },
+        ]
 
         let accumulated = ""
         let thinkingOpen = false
@@ -257,7 +594,7 @@ export function ChatPanel() {
           let streamError: Error | null = null
           await streamChat(
             llmConfig,
-            agentResult.messages,
+            finalMessages,
             {
               onToken: (token) => {
                 if (!isCurrentRun()) return
@@ -298,9 +635,11 @@ export function ChatPanel() {
         if (!isCurrentRun()) return
         closeReasoning()
         finalized = true
-        finalizeStream(accumulated, agentResult.references, agentResult.steps)
+        finalizeStream(accumulated, backendReferences, backendSteps)
         setAgentEvents([])
         abortRef.current = null
+        activeRunSessionIdRef.current = null
+        activeRunIdRef.current = null
         // save-worthy detection removed — user has direct "Save to Wiki" button on each message
       } catch (err) {
         if (!finalized) {
@@ -308,6 +647,8 @@ export function ChatPanel() {
             setStreaming(false)
             setAgentEvents([])
             abortRef.current = null
+            activeRunSessionIdRef.current = null
+            activeRunIdRef.current = null
             return
           }
           const message = err instanceof Error ? err.message : String(err)
@@ -315,18 +656,31 @@ export function ChatPanel() {
           setAgentEvents([])
         }
         abortRef.current = null
+        activeRunSessionIdRef.current = null
+        activeRunIdRef.current = null
       }
     },
-    [project, llmConfig, searchApiConfig, addMessage, setStreaming, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages],
+    [project, llmConfig, searchApiConfig, addMessage, setStreaming, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages, t],
   )
 
   const handleStop = useCallback(() => {
     runIdRef.current += 1
+    const sessionId = activeRunSessionIdRef.current
+    const backendRunId = activeRunIdRef.current
+    if (sessionId) {
+      void invoke("agent_cancel_turn", {
+        projectId: project?.id ?? "current",
+        sessionId,
+        runId: backendRunId ?? undefined,
+      }).catch(() => {})
+    }
     abortRef.current?.abort()
     abortRef.current = null
+    activeRunSessionIdRef.current = null
+    activeRunIdRef.current = null
     setStreaming(false)
     setAgentEvents([])
-  }, [setStreaming])
+  }, [project, setStreaming])
 
   const handleRegenerate = useCallback(async () => {
     if (isStreaming) return
@@ -595,20 +949,4 @@ function isAbortLikeError(err: unknown): boolean {
   if (err instanceof DOMException && err.name === "AbortError") return true
   if (!(err instanceof Error)) return false
   return err.name === "AbortError" || /abort|cancel/i.test(err.message)
-}
-
-function collectRecentRetrievalHistory(messages: ReturnType<typeof useChatStore.getState>["messages"]): MessageReference[] {
-  const refs: MessageReference[] = []
-  const seen = new Set<string>()
-  for (const msg of [...messages].reverse()) {
-    if (msg.role !== "assistant" || !msg.references) continue
-    for (const ref of msg.references) {
-      const key = `${ref.kind ?? "wiki"}:${ref.url ?? ref.path}`.toLowerCase()
-      if (seen.has(key)) continue
-      seen.add(key)
-      refs.push(ref)
-      if (refs.length >= 10) return refs
-    }
-  }
-  return refs
 }
