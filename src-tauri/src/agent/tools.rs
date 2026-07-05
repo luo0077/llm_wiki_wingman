@@ -1,27 +1,39 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+use tokio::task::JoinHandle;
+use tokio::time::{timeout, Duration};
 use walkdir::WalkDir;
 
 use crate::commands::external_search::file_url_for_path;
 use crate::commands::search::{self, SearchEmbeddingConfig};
 
 use super::types::AgentReference;
+use super::workspace::{agent_workspace_path, AGENT_WORKSPACE_DIR};
 
 // Tool I/O limits are backend security boundaries. Do not relax them only in
 // the UI: API and MCP callers can invoke the same tools without going through
 // React components.
 const MAX_READ_PAGE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_WRITE_PAGE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_WORKSPACE_WRITE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SOURCE_SEARCH_FILES: usize = 10_000;
 const MAX_SOURCE_SNIPPET_CHARS: usize = 500;
 const MAX_GRAPH_SEARCH_FILES: usize = 10_000;
 const WEB_SEARCH_TIMEOUT_SECS: u64 = 30;
+const SHELL_EXEC_TIMEOUT_SECS: u64 = 30;
+const MAX_SHELL_COMMAND_CHARS: usize = 4_000;
+const MAX_SHELL_OUTPUT_CHARS: usize = 20_000;
+const SHELL_OUTPUT_DRAIN_TIMEOUT_SECS: u64 = 1;
 const DEFAULT_ANYTXT_ENDPOINT: &str = "http://127.0.0.1:9920";
 const DEFAULT_ANYTXT_LIMIT: usize = 20;
 const ANYTXT_LAST_MODIFY_END: i64 = 2_147_483_647;
@@ -32,6 +44,7 @@ pub enum ToolEffect {
     Read,
     Write,
     Network,
+    Process,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -142,6 +155,38 @@ impl ToolRegistry for BuiltinToolRegistry {
                     }))
                     .map_err(|err| format!("Failed to serialize wiki.read_page result: {err}"))
                 }
+                "workspace.write_file" => {
+                    let path = input
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "workspace.write_file requires path".to_string())?;
+                    let content = input
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "workspace.write_file requires content".to_string())?;
+                    serde_json::to_value(write_workspace_file(context.project_path, path, content)?)
+                        .map_err(|err| {
+                            format!("Failed to serialize workspace.write_file result: {err}")
+                        })
+                }
+                "workspace.append_file" => {
+                    let path = input
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "workspace.append_file requires path".to_string())?;
+                    let content = input
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "workspace.append_file requires content".to_string())?;
+                    serde_json::to_value(append_workspace_file(
+                        context.project_path,
+                        path,
+                        content,
+                    )?)
+                    .map_err(|err| {
+                        format!("Failed to serialize workspace.append_file result: {err}")
+                    })
+                }
                 "source.search" => {
                     let query = tool_query(&input, "source.search")?.to_string();
                     let project_path = context.project_path.to_string();
@@ -195,6 +240,23 @@ impl ToolRegistry for BuiltinToolRegistry {
                     }))
                     .map_err(|err| format!("Failed to serialize deep_research.run result: {err}"))
                 }
+                "shell.exec" => {
+                    let command = input
+                        .get("command")
+                        .or_else(|| input.get("query"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "shell.exec requires command".to_string())?;
+                    let timeout_secs = input
+                        .get("timeoutSeconds")
+                        .or_else(|| input.get("timeout_seconds"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or(SHELL_EXEC_TIMEOUT_SECS)
+                        .clamp(1, SHELL_EXEC_TIMEOUT_SECS);
+                    serde_json::to_value(
+                        run_shell_exec(context.project_path, command, timeout_secs).await?,
+                    )
+                    .map_err(|err| format!("Failed to serialize shell.exec result: {err}"))
+                }
                 other => Err(format!("Unknown Agent tool: {other}")),
             }
         })
@@ -208,6 +270,23 @@ pub struct WikiSearchToolOutput {
     pub token_hits: usize,
     pub vector_hits: usize,
     pub references: Vec<AgentReference>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellExecToolOutput {
+    pub command: String,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub timed_out: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWriteOutput {
+    pub path: String,
+    pub bytes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -432,6 +511,78 @@ pub fn builtin_tool_specs() -> Vec<ToolSpec> {
             effects: vec![ToolEffect::Read],
             parameters: None,
         },
+        ToolSpec {
+            name: "skill.read_file".to_string(),
+            description:
+                "Read a text reference file from an active skill directory by relative path."
+                    .to_string(),
+            effects: vec![ToolEffect::Read],
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "skill": {
+                        "type": "string",
+                        "description": "Optional active skill name; required when multiple skills are active."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path inside the active skill directory, such as references/types.md."
+                    }
+                },
+                "required": ["path"]
+            })),
+        },
+        ToolSpec {
+            name: "workspace.write_file".to_string(),
+            description:
+                "Write a generated artifact file under the visible agent-workspace directory."
+                    .to_string(),
+            effects: vec![ToolEffect::Write],
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path under agent-workspace, such as cover-image/cover.svg."
+                    },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"]
+            })),
+        },
+        ToolSpec {
+            name: "workspace.append_file".to_string(),
+            description:
+                "Append generated artifact content under agent-workspace. Use after workspace.write_file for large HTML/PPT files."
+                    .to_string(),
+            effects: vec![ToolEffect::Write],
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path under agent-workspace, matching the file being appended."
+                    },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"]
+            })),
+        },
+        ToolSpec {
+            name: "shell.exec".to_string(),
+            description:
+                "Run a project-scoped shell command requested by an active skill instruction."
+                    .to_string(),
+            effects: vec![ToolEffect::Read, ToolEffect::Process],
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string" },
+                    "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": SHELL_EXEC_TIMEOUT_SECS }
+                },
+                "required": ["command"]
+            })),
+        },
     ]
 }
 
@@ -499,6 +650,90 @@ pub fn write_wiki_page_with_options(
     })
 }
 
+fn write_workspace_file(
+    project_path: &str,
+    rel_path: &str,
+    content: &str,
+) -> Result<WorkspaceWriteOutput, String> {
+    if content.len() > MAX_WORKSPACE_WRITE_BYTES {
+        return Err("workspace.write_file content is too large".to_string());
+    }
+    let (rel, path) =
+        resolve_workspace_write_target(project_path, rel_path, "workspace.write_file")?;
+    if path
+        .symlink_metadata()
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("workspace.write_file refuses to overwrite a symlink".to_string());
+    }
+    fs::write(&path, content).map_err(|err| format!("workspace.write_file failed: {err}"))?;
+    Ok(WorkspaceWriteOutput {
+        path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
+        bytes: content.len(),
+    })
+}
+
+fn append_workspace_file(
+    project_path: &str,
+    rel_path: &str,
+    content: &str,
+) -> Result<WorkspaceWriteOutput, String> {
+    if content.len() > MAX_WORKSPACE_WRITE_BYTES {
+        return Err("workspace.append_file content is too large".to_string());
+    }
+    let (rel, path) =
+        resolve_workspace_write_target(project_path, rel_path, "workspace.append_file")?;
+    if path
+        .symlink_metadata()
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        return Err("workspace.append_file refuses to overwrite a symlink".to_string());
+    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| {
+            use std::io::Write;
+            file.write_all(content.as_bytes())
+        })
+        .map_err(|err| format!("workspace.append_file failed: {err}"))?;
+    let bytes = fs::metadata(&path)
+        .map(|metadata| metadata.len() as usize)
+        .unwrap_or(content.len());
+    Ok(WorkspaceWriteOutput {
+        path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
+        bytes,
+    })
+}
+
+fn resolve_workspace_write_target(
+    project_path: &str,
+    rel_path: &str,
+    tool_name: &str,
+) -> Result<(String, PathBuf), String> {
+    let rel = normalize_workspace_write_path(rel_path)
+        .map_err(|err| err.replace("workspace.write_file", tool_name))?;
+    let project = Path::new(project_path);
+    if !project.is_dir() {
+        return Err(format!("{tool_name} project directory is not available"));
+    }
+    let workspace = agent_workspace_path(project);
+    fs::create_dir_all(&workspace)
+        .map_err(|err| format!("{tool_name} failed to create workspace: {err}"))?;
+    ensure_project_bound_path(project_path, &workspace)?;
+    let path = workspace.join(&rel);
+    if let Some(parent) = path.parent() {
+        ensure_existing_ancestor_bound(project_path, parent)?;
+        fs::create_dir_all(parent)
+            .map_err(|err| format!("{tool_name} failed to create directory: {err}"))?;
+        ensure_project_bound_path(project_path, parent)?;
+    }
+    Ok((rel, path))
+}
+
 pub async fn run_wiki_search(
     project_path: String,
     query: &str,
@@ -532,6 +767,175 @@ pub async fn run_wiki_search(
         vector_hits: search.vector_hits,
         references,
     })
+}
+
+async fn run_shell_exec(
+    project_path: &str,
+    command: &str,
+    timeout_secs: u64,
+) -> Result<ShellExecToolOutput, String> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("shell.exec command is empty".to_string());
+    }
+    if command.chars().count() > MAX_SHELL_COMMAND_CHARS {
+        return Err("shell.exec command is too long".to_string());
+    }
+    let cwd = Path::new(project_path);
+    if !cwd.is_dir() {
+        return Err("shell.exec project directory is not available".to_string());
+    }
+    let workspace = agent_workspace_path(cwd);
+    fs::create_dir_all(&workspace)
+        .map_err(|err| format!("shell.exec failed to create {AGENT_WORKSPACE_DIR}: {err}"))?;
+    #[cfg(windows)]
+    let mut child = {
+        let shell = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd".into());
+        let mut cmd = Command::new(shell);
+        cmd.args(["/C", command]);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let mut child = {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", command]);
+        cmd
+    };
+    apply_sanitized_shell_env(&mut child, project_path, &workspace);
+    child
+        .current_dir(&workspace)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = child
+        .spawn()
+        .map_err(|err| format!("shell.exec failed to start: {err}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "shell.exec failed to capture stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "shell.exec failed to capture stderr".to_string())?;
+    let stdout_task = tokio::spawn(read_limited_output(stdout, MAX_SHELL_OUTPUT_CHARS));
+    let stderr_task = tokio::spawn(read_limited_output(stderr, MAX_SHELL_OUTPUT_CHARS));
+    let status = timeout(Duration::from_secs(timeout_secs), child.wait()).await;
+    let (exit_code, timed_out, timeout_message) = match status {
+        Ok(Ok(status)) => (status.code(), false, None),
+        Ok(Err(err)) => return Err(format!("shell.exec failed while waiting: {err}")),
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            (
+                None,
+                true,
+                Some(format!("Command timed out after {timeout_secs}s")),
+            )
+        }
+    };
+    let stdout = await_shell_output(stdout_task, "stdout").await?;
+    let mut stderr = await_shell_output(stderr_task, "stderr").await?;
+    if let Some(message) = timeout_message {
+        if !stderr.is_empty() {
+            stderr.push('\n');
+        }
+        stderr.push_str(&message);
+    }
+    Ok(ShellExecToolOutput {
+        command: command.to_string(),
+        exit_code,
+        stdout,
+        stderr,
+        timed_out,
+    })
+}
+
+async fn await_shell_output(mut handle: JoinHandle<String>, label: &str) -> Result<String, String> {
+    match timeout(
+        Duration::from_secs(SHELL_OUTPUT_DRAIN_TIMEOUT_SECS),
+        &mut handle,
+    )
+    .await
+    {
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(err)) => Err(format!("shell.exec {label} task failed: {err}")),
+        Err(_) => {
+            handle.abort();
+            Ok(format!(
+                "[{label} output was still open after command exit and was truncated]"
+            ))
+        }
+    }
+}
+
+fn apply_sanitized_shell_env(command: &mut Command, project_path: &str, workspace: &Path) {
+    // This is environment minimization, not an OS sandbox. `shell.exec` is only
+    // reachable after an exact user approval in the Agent runtime, and approved
+    // commands can still access the user's normal filesystem through the shell.
+    // Keep generated artifacts in `LLM_WIKI_AGENT_WORKSPACE`, but do not imply
+    // stronger process isolation here without adding a real sandbox layer.
+    command.env_clear();
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
+    if let Some(lang) = std::env::var_os("LANG") {
+        command.env("LANG", lang);
+    }
+    #[cfg(not(windows))]
+    {
+        for key in ["HOME", "USER", "LOGNAME", "SHELL"] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        for key in [
+            "ComSpec",
+            "SystemRoot",
+            "WINDIR",
+            "PATHEXT",
+            "USERPROFILE",
+            "USERNAME",
+            "HOMEDRIVE",
+            "HOMEPATH",
+        ] {
+            if let Some(value) = std::env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+    }
+    command.env("LLM_WIKI_PROJECT", project_path);
+    command.env("LLM_WIKI_PROJECT_PATH", project_path);
+    command.env("LLM_WIKI_AGENT_WORKSPACE", workspace);
+}
+
+async fn read_limited_output<R>(mut reader: R, max_chars: usize) -> String
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut kept = Vec::new();
+    let max_bytes = max_chars.saturating_mul(4);
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let Ok(n) = reader.read(&mut buffer).await else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        if kept.len() < max_bytes {
+            let remaining = max_bytes - kept.len();
+            kept.extend_from_slice(&buffer[..n.min(remaining)]);
+        }
+    }
+    let mut text = String::from_utf8_lossy(&kept).to_string();
+    if text.chars().count() > max_chars {
+        text = trim_text(&text, max_chars);
+    }
+    text
 }
 
 pub async fn run_web_search(
@@ -1630,6 +2034,37 @@ fn normalize_wiki_write_path(path: &str) -> Result<String, String> {
     Ok(rel)
 }
 
+fn normalize_workspace_write_path(path: &str) -> Result<String, String> {
+    let rel = normalize_rel_path(path);
+    let lower = rel.to_ascii_lowercase();
+    if rel.is_empty()
+        || lower.starts_with("wiki/")
+        || lower.starts_with("raw/")
+        || lower.split('/').any(|segment| segment.starts_with('.'))
+    {
+        return Err(
+            "workspace.write_file path must be a relative file under agent-workspace".to_string(),
+        );
+    }
+    let rel_path = Path::new(&rel);
+    if rel_path.is_absolute()
+        || rel_path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err("workspace.write_file path must stay inside agent-workspace".to_string());
+    }
+    for segment in rel.split('/') {
+        validate_workspace_path_segment(segment)?;
+    }
+    Ok(rel)
+}
+
+fn validate_workspace_path_segment(segment: &str) -> Result<(), String> {
+    validate_portable_path_segment(segment)
+        .map_err(|err| err.replace("wiki.write_page", "workspace.write_file"))
+}
+
 fn validate_portable_path_segment(segment: &str) -> Result<(), String> {
     if segment.is_empty() {
         return Err("wiki.write_page path contains an empty segment".to_string());
@@ -1778,6 +2213,10 @@ mod tests {
         assert!(names.contains(&"wiki.write_page".to_string()));
         assert!(names.contains(&"llm.generate".to_string()));
         assert!(names.contains(&"skills.load".to_string()));
+        assert!(names.contains(&"skill.read_file".to_string()));
+        assert!(names.contains(&"workspace.write_file".to_string()));
+        assert!(names.contains(&"workspace.append_file".to_string()));
+        assert!(names.contains(&"shell.exec".to_string()));
     }
 
     #[test]
@@ -1815,6 +2254,221 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(deep["status"], "orchestrated_by_agent_runtime");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn registry_executes_project_scoped_shell_command() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-shell-tool-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let registry = BuiltinToolRegistry;
+        let context = ToolContext {
+            project_path: root.to_str().unwrap(),
+            embedding_config: None,
+            web_search_config: None,
+            anytxt_config: None,
+        };
+        let output = registry
+            .execute(
+                "shell.exec",
+                json!({ "command": "echo skill-ok", "timeoutSeconds": 5 }),
+                context,
+            )
+            .await
+            .unwrap();
+        assert!(output["stdout"].as_str().unwrap().contains("skill-ok"));
+        assert_eq!(output["timedOut"], false);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn shell_exec_timeout_returns_without_unbounded_wait() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-shell-timeout-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        let command = "ping -n 6 127.0.0.1 > nul";
+        #[cfg(not(windows))]
+        let command = "sleep 5";
+        let output = run_shell_exec(root.to_str().unwrap(), command, 1)
+            .await
+            .unwrap();
+        assert!(output.timed_out);
+        assert!(output.stderr.contains("timed out"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn shell_exec_does_not_wait_forever_for_background_pipe_holders() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-shell-bg-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let output = timeout(
+            Duration::from_secs(3),
+            run_shell_exec(root.to_str().unwrap(), "sleep 5 &", 5),
+        )
+        .await
+        .expect("shell.exec should not hang on background grandchildren")
+        .unwrap();
+        assert!(output.stdout.contains("output was still open"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn shell_exec_sanitizes_environment() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-shell-env-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        std::env::set_var("LLM_WIKI_SECRET_TEST_SENTINEL", "must-not-leak");
+        let output = run_shell_exec(root.to_str().unwrap(), "env", 5)
+            .await
+            .unwrap();
+        std::env::remove_var("LLM_WIKI_SECRET_TEST_SENTINEL");
+        assert!(output
+            .stdout
+            .contains(&format!("LLM_WIKI_PROJECT={}", root.to_string_lossy())));
+        assert!(output.stdout.contains(&format!(
+            "LLM_WIKI_AGENT_WORKSPACE={}",
+            root.join(AGENT_WORKSPACE_DIR).to_string_lossy()
+        )));
+        assert!(!output.stdout.contains("LLM_WIKI_SECRET_TEST_SENTINEL="));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn shell_exec_runs_from_visible_agent_workspace() {
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-shell-workspace-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        let command = "cd && echo hello>generated.txt";
+        #[cfg(not(windows))]
+        let command = "pwd && printf hello > generated.txt";
+
+        let output = run_shell_exec(root.to_str().unwrap(), command, 5)
+            .await
+            .unwrap();
+        let workspace = root.join(AGENT_WORKSPACE_DIR);
+
+        assert!(workspace.is_dir());
+        assert_eq!(
+            fs::read_to_string(workspace.join("generated.txt"))
+                .unwrap()
+                .trim(),
+            "hello"
+        );
+        assert!(!root.join("generated.txt").exists());
+        assert!(output
+            .stdout
+            .replace('\\', "/")
+            .contains(&workspace.to_string_lossy().replace('\\', "/")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_write_file_writes_only_visible_agent_workspace_files() {
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-workspace-write-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+
+        let written =
+            write_workspace_file(root.to_str().unwrap(), "cover-image/cover.svg", "<svg/>")
+                .unwrap();
+        assert_eq!(written.path, "agent-workspace/cover-image/cover.svg");
+        assert_eq!(
+            fs::read_to_string(root.join("agent-workspace/cover-image/cover.svg")).unwrap(),
+            "<svg/>"
+        );
+        assert!(write_workspace_file(root.to_str().unwrap(), "../escape.txt", "x").is_err());
+        assert!(write_workspace_file(root.to_str().unwrap(), "wiki/page.md", "x").is_err());
+        assert!(write_workspace_file(root.to_str().unwrap(), ".hidden/file.txt", "x").is_err());
+        assert!(write_workspace_file(
+            root.to_str().unwrap(),
+            "large.txt",
+            &"x".repeat(MAX_WORKSPACE_WRITE_BYTES + 1)
+        )
+        .unwrap_err()
+        .contains("too large"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn workspace_append_file_extends_visible_workspace_files() {
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-workspace-append-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+
+        write_workspace_file(root.to_str().unwrap(), "ppt/index.html", "<html>").unwrap();
+        let appended =
+            append_workspace_file(root.to_str().unwrap(), "ppt/index.html", "</html>").unwrap();
+
+        assert_eq!(appended.path, "agent-workspace/ppt/index.html");
+        assert_eq!(appended.bytes, "<html></html>".len());
+        assert_eq!(
+            fs::read_to_string(root.join("agent-workspace/ppt/index.html")).unwrap(),
+            "<html></html>"
+        );
+        assert!(append_workspace_file(root.to_str().unwrap(), "../escape.txt", "x").is_err());
+        assert!(append_workspace_file(root.to_str().unwrap(), ".hidden/file.txt", "x").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_write_file_rejects_target_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-workspace-symlink-{}", Uuid::new_v4()));
+        let outside =
+            std::env::temp_dir().join(format!("llm-wiki-workspace-outside-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join(AGENT_WORKSPACE_DIR)).unwrap();
+        fs::write(&outside, "original").unwrap();
+        symlink(&outside, root.join(AGENT_WORKSPACE_DIR).join("escape.txt")).unwrap();
+
+        assert!(
+            write_workspace_file(root.to_str().unwrap(), "escape.txt", "overwrite")
+                .unwrap_err()
+                .contains("symlink")
+        );
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "original");
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(outside);
+    }
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn shell_exec_caps_large_output() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-shell-cap-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let output = run_shell_exec(root.to_str().unwrap(), "printf '%050000d' 0", 5)
+            .await
+            .unwrap();
+        assert!(output.stdout.chars().count() <= MAX_SHELL_OUTPUT_CHARS + 3);
+        assert!(output.stdout.ends_with("..."));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn shell_exec_rejects_invalid_inputs() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-shell-invalid-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(run_shell_exec(root.to_str().unwrap(), "", 1)
+            .await
+            .unwrap_err()
+            .contains("empty"));
+        assert!(run_shell_exec(
+            root.to_str().unwrap(),
+            &"x".repeat(MAX_SHELL_COMMAND_CHARS + 1),
+            1
+        )
+        .await
+        .unwrap_err()
+        .contains("too long"));
+        let missing = root.join("missing");
+        assert!(run_shell_exec(missing.to_str().unwrap(), "echo no", 1)
+            .await
+            .unwrap_err()
+            .contains("not available"));
         let _ = fs::remove_dir_all(root);
     }
 

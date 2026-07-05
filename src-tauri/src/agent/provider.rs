@@ -41,6 +41,8 @@ pub struct LlmConfig {
     pub api_mode: Option<String>,
     #[serde(default)]
     pub reasoning: Option<LlmReasoningConfig>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
     // Mirrors the app's existing `maxContextSize` setting. It is treated as a
     // character budget here for compatibility with the TypeScript budget model;
     // do not reinterpret it as provider tokens without migrating callers.
@@ -291,7 +293,7 @@ impl LlmClient {
                 { "role": "user", "content": user_content }
             ],
             "stream": stream,
-            "max_tokens": DEFAULT_MAX_TOKENS
+            "max_tokens": self.max_output_tokens()
         });
         if include_model {
             body["model"] = Value::String(self.config.model.clone());
@@ -379,7 +381,7 @@ impl LlmClient {
             "model": self.config.model,
             "system": [{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }],
             "messages": [{ "role": "user", "content": anthropic_user_content(user, images) }],
-            "max_tokens": DEFAULT_MAX_TOKENS,
+            "max_tokens": self.max_output_tokens(),
         });
         if stream {
             body["stream"] = Value::Bool(true);
@@ -482,7 +484,7 @@ impl LlmClient {
                 "parts": parts
             }],
             "generationConfig": {
-                "maxOutputTokens": DEFAULT_MAX_TOKENS
+                "maxOutputTokens": self.max_output_tokens()
             }
         });
         apply_google_reasoning(&mut body, self.config.reasoning.as_ref());
@@ -568,6 +570,26 @@ impl LlmClient {
             .await
             .map_err(|err| format!("LLM request failed: {err}"))?;
         collect_sse_text(response, parse_google_delta, on_delta).await
+    }
+
+    pub fn structured_task_config(&self, max_tokens: u32) -> Self {
+        let mut config = self.config.clone();
+        config.reasoning = Some(LlmReasoningConfig {
+            mode: Some("off".to_string()),
+            budget_tokens: None,
+        });
+        config.max_tokens = Some(max_tokens);
+        Self {
+            config,
+            client: self.client.clone(),
+        }
+    }
+
+    fn max_output_tokens(&self) -> u32 {
+        self.config
+            .max_tokens
+            .unwrap_or(DEFAULT_MAX_TOKENS)
+            .clamp(256, 32_768)
     }
 }
 
@@ -938,6 +960,7 @@ mod tests {
             azure_api_version: None,
             api_mode: None,
             reasoning: None,
+            max_tokens: None,
             max_context_size: None,
         }
     }
@@ -1019,6 +1042,7 @@ mod tests {
             cfg.reasoning.as_ref().and_then(|r| r.budget_tokens),
             Some(4096)
         );
+        assert_eq!(cfg.max_tokens, None);
     }
 
     #[test]
@@ -1039,6 +1063,20 @@ mod tests {
                 budget_tokens: None,
             }),
         );
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn structured_task_config_disables_reasoning_and_raises_output_budget() {
+        let mut cfg = config("openai");
+        cfg.reasoning = Some(LlmReasoningConfig {
+            mode: Some("high".to_string()),
+            budget_tokens: None,
+        });
+        let client = LlmClient::new(cfg).unwrap().structured_task_config(16_384);
+        let body = client.openai_like_body("system", "user", &[], true, false);
+
+        assert_eq!(body.get("max_tokens").and_then(Value::as_u64), Some(16_384));
         assert!(body.get("reasoning_effort").is_none());
     }
 

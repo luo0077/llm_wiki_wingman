@@ -1703,7 +1703,7 @@ fn handle_chat(app: &AppHandle, project_id: &str, body: &str) -> ApiResponse {
     }
     let requested_session_id = req.session_id.clone();
     if let Some(session_id) = requested_session_id.as_deref() {
-        if req.history.is_empty() {
+        if req.history.is_empty() && !req.history_explicit {
             req.history = app
                 .state::<agent::session::AgentSessionStore>()
                 .recent_messages(&project.path, session_id, 12)

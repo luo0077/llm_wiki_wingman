@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::types::AgentReference;
+use super::types::{AgentReference, AgentUserInputRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "type")]
@@ -27,6 +27,9 @@ pub enum AgentEvent {
     },
     Error {
         message: String,
+    },
+    UserInputRequired {
+        request: AgentUserInputRequest,
     },
     Done {
         session_id: String,

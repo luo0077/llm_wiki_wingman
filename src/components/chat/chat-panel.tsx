@@ -11,17 +11,22 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { isReasoningOnlyResponseError, streamChat } from "@/lib/llm-client"
 import { supportsImageInput } from "@/lib/llm-providers"
 import { executeIngestWrites } from "@/lib/ingest"
-import { deleteFile } from "@/commands/fs"
+import { deleteFile, readFile } from "@/commands/fs"
 import { getFileName, normalizePath } from "@/lib/path-utils"
 import { hasConfiguredAnyTxt } from "@/lib/anytxt-search"
-import type { ChatAgentEvent } from "@/lib/chat-agent-types"
+import type { ChatAgentEvent, ChatAgentStep, ChatUserInputRequest } from "@/lib/chat-agent-types"
 import type { ChatMessage as LlmChatMessage, ContentBlock } from "@/lib/llm-client"
 import { FilePreview } from "@/components/editor/file-preview"
 import { WikiReader } from "@/components/editor/wiki-reader"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { parseFrontmatter } from "@/lib/frontmatter"
-import { getFileCategory } from "@/lib/file-types"
+import { getFileCategory, isTextReadable } from "@/lib/file-types"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+
+type InternalChatSendOptions = ChatSendOptions & {
+  suppressUserMessage?: boolean
+  historyOverride?: { role: "user" | "assistant"; content: string }[]
+}
 
 interface BackendAgentReference {
   title: string
@@ -48,6 +53,7 @@ interface BackendAgentEventPayload {
     output?: string
     message?: string
     reference?: BackendAgentReference
+    request?: ChatUserInputRequest
     sessionId?: string
   }
 }
@@ -58,10 +64,27 @@ interface BackendAgentResponse {
   message: string | { role?: string; content?: string }
   references?: BackendAgentReference[]
   toolEvents?: BackendAgentToolEvent[]
+  userInputRequest?: ChatUserInputRequest
+}
+
+interface AvailableAgentSkill {
+  id: string
+  name: string
+  description?: string
+  source: string
 }
 
 // Store the page mapping from the last query so SourceFilesBar can show which pages were cited
 export let lastQueryPages: { title: string; path: string }[] = []
+
+const AGENT_STREAM_IDLE_TIMEOUT_MS = 8 * 60 * 1000
+const AGENT_SKILL_STREAM_IDLE_TIMEOUT_MS = 15 * 60 * 1000
+
+function agentStreamIdleTimeoutMs(options: ChatSendOptions, skillCount: number): number {
+  return skillCount > 0 || options.agentMode === "deep"
+    ? AGENT_SKILL_STREAM_IDLE_TIMEOUT_MS
+    : AGENT_STREAM_IDLE_TIMEOUT_MS
+}
 
 function formatDate(timestamp: number): string {
   const d = new Date(timestamp)
@@ -167,8 +190,10 @@ function ConversationSidebar() {
 function backendReferenceToMessageReference(ref: BackendAgentReference): MessageReference {
   const isWiki = ref.kind === "wiki" || ref.path.startsWith("wiki/")
   const isWeb = ref.kind === "web" || /^https?:\/\//i.test(ref.path)
+  const isWorkspace = ref.kind === "workspace" || ref.path.startsWith("agent-workspace/")
   const source =
-    ref.kind === "anytxt" ? "AnyTXT"
+    isWorkspace ? "Workspace"
+      : ref.kind === "anytxt" ? "AnyTXT"
       : ref.kind === "web" ? "Web"
         : ref.kind === "source" ? "Source"
           : ref.kind === "graph" ? "Graph"
@@ -176,11 +201,19 @@ function backendReferenceToMessageReference(ref: BackendAgentReference): Message
   return {
     title: ref.title,
     path: ref.path,
-    kind: isWiki ? "wiki" : "external",
+    kind: isWiki ? "wiki" : isWorkspace ? "workspace" : "external",
     source,
     url: isWeb ? ref.path : undefined,
     snippet: ref.snippet,
   }
+}
+
+function projectAbsolutePath(projectPath: string, path: string): string {
+  const pp = normalizePath(projectPath)
+  const normalized = normalizePath(path)
+  if (normalized.startsWith(`${pp}/`)) return normalized
+  if (normalized.startsWith("/")) return normalized
+  return `${pp}/${normalized.replace(/^\/+/, "")}`
 }
 
 function backendToolToAgentStep(event: BackendAgentToolEvent, index: number) {
@@ -220,11 +253,15 @@ function normalizeBackendToolName(tool: string) {
   if (normalized === "wiki_search") return "wiki_search" as const
   if (normalized === "wiki_read_page") return "project_file_read" as const
   if (normalized === "wiki_write_page") return "project_files" as const
+  if (normalized === "workspace_write_file") return "project_files" as const
+  if (normalized === "workspace_append_file") return "project_files" as const
   if (normalized === "skills_load") return "project_file_read" as const
+  if (normalized === "skill_read_file") return "project_file_read" as const
   if (normalized === "source_search") return "project_file_read" as const
   if (normalized === "graph_search") return "graph_search" as const
   if (normalized === "web_search") return "web_search" as const
   if (normalized === "anytxt_search") return "anytxt_search" as const
+  if (normalized === "shell_exec") return "shell_exec" as const
   if (normalized === "deep_research_run") return "project_file_read" as const
   return "unknown_tool" as const
 }
@@ -271,6 +308,42 @@ function backendResponseText(response: BackendAgentResponse): string {
   return response.message?.content ?? ""
 }
 
+function enabledSkillIds(skills: AvailableAgentSkill[], disabledSkills: string[]): Set<string> {
+  const disabled = new Set(disabledSkills)
+  return new Set(skills.filter((skill) => !disabled.has(skill.id)).map((skill) => skill.id))
+}
+
+function summarizeAgentStepsForResume(steps: ChatAgentStep[] = []): string {
+  const lines = steps
+    .filter((step) => step.message?.trim())
+    .slice(-12)
+    .map((step) => {
+      const label = step.tool ?? step.type
+      const status = step.status ?? "success"
+      return `- ${label} ${status}: ${step.message?.trim()}`
+    })
+  return lines.length > 0 ? lines.join("\n") : "- No prior tool observations were saved."
+}
+
+function compactChatHistoryForResume(
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
+  maxMessages: number,
+): { role: "user" | "assistant"; content: string }[] {
+  return messages
+    .filter((message): message is { role: "user" | "assistant"; content: string } =>
+      message.role === "user" || message.role === "assistant"
+    )
+    .slice(-maxMessages)
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+}
+
+function conversationMessages(conversationId: string) {
+  return useChatStore.getState().messages.filter((message) => message.conversationId === conversationId)
+}
+
 export function ChatPanel() {
   const { t } = useTranslation()
   useSourceFiles() // Keep source file cache warm
@@ -278,19 +351,22 @@ export function ChatPanel() {
   const isStreaming = useChatStore((s) => s.isStreaming)
   const streamingContent = useChatStore((s) => s.streamingContent)
   const mode = useChatStore((s) => s.mode)
-  const addMessage = useChatStore((s) => s.addMessage)
+  const addMessageToConversation = useChatStore((s) => s.addMessageToConversation)
   const setStreaming = useChatStore((s) => s.setStreaming)
   const appendStreamToken = useChatStore((s) => s.appendStreamToken)
-  const finalizeStream = useChatStore((s) => s.finalizeStream)
+  const finalizeStreamForConversation = useChatStore((s) => s.finalizeStreamForConversation)
   const createConversation = useChatStore((s) => s.createConversation)
   const removeLastAssistantMessage = useChatStore((s) => s.removeLastAssistantMessage)
   const maxHistoryMessages = useChatStore((s) => s.maxHistoryMessages)
   const useWebSearch = useChatStore((s) => s.useWebSearch)
   const useAnyTxtSearch = useChatStore((s) => s.useAnyTxtSearch)
   const agentMode = useChatStore((s) => s.agentMode)
+  const selectedSkills = useChatStore((s) => s.selectedSkills)
+  const disabledSkills = useChatStore((s) => s.disabledSkills)
   const setUseWebSearch = useChatStore((s) => s.setUseWebSearch)
   const setUseAnyTxtSearch = useChatStore((s) => s.setUseAnyTxtSearch)
   const setAgentMode = useChatStore((s) => s.setAgentMode)
+  const setSelectedSkills = useChatStore((s) => s.setSelectedSkills)
 
   // Derive active messages via selector to re-render on message changes
   const allMessages = useChatStore((s) => s.messages)
@@ -313,13 +389,49 @@ export function ChatPanel() {
   const [agentEvents, setAgentEvents] = useState<ChatAgentEvent[]>([])
   const [referencePreview, setReferencePreview] = useState<ChatReferencePreview | null>(null)
   const [referencePreviewWidth, setReferencePreviewWidth] = useState(420)
+  const [availableSkills, setAvailableSkills] = useState<AvailableAgentSkill[]>([])
+  const [approvingShellMessageId, setApprovingShellMessageId] = useState<string | null>(null)
+  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
+  const openGeneratedOutputPreview = useCallback(async (ref: MessageReference) => {
+    if (!project) return
+    const outputPath = projectAbsolutePath(project.path, ref.path)
+    try {
+      const category = getFileCategory(outputPath)
+      const shouldReadContent = isTextReadable(category) || category === "pdf"
+      const content = shouldReadContent ? await readFile(outputPath) : ""
+      setReferencePreview({
+        title: ref.title || getFileName(outputPath),
+        path: outputPath,
+        source: ref.source ?? "Workspace",
+        content,
+        snippet: ref.snippet,
+      })
+    } catch (err) {
+      console.warn("[chat] failed to auto-open generated output:", err)
+      setReferencePreview({
+        title: ref.title || getFileName(outputPath),
+        path: outputPath,
+        source: ref.source ?? "Workspace",
+        content: `Unable to load generated file: ${ref.path}`,
+        snippet: ref.snippet,
+      })
+    }
+  }, [project])
+  const autoOpenSingleGeneratedOutput = useCallback((conversationId: string, references?: MessageReference[]) => {
+    if (useChatStore.getState().activeConversationId !== conversationId) return
+    const outputs = (references ?? []).filter((ref) => ref.kind === "workspace")
+    if (outputs.length !== 1) return
+    void openGeneratedOutputPreview(outputs[0])
+  }, [openGeneratedOutputPreview])
+  const activeStreaming = Boolean(isStreaming && activeConversationId && streamingConversationId === activeConversationId)
+  const activeAgentEvents = activeStreaming ? agentEvents : []
   const lastMessage = activeMessages[activeMessages.length - 1]
   const scrollKey = [
     activeConversationId ?? "",
     activeMessages.length,
     lastMessage?.id ?? "",
     lastMessage?.content.length ?? 0,
-    isStreaming ? streamingContent.length : 0,
+    activeStreaming ? streamingContent.length : 0,
   ].join(":")
 
   // Auto-scroll to bottom when messages change or streaming content updates
@@ -330,24 +442,69 @@ export function ChatPanel() {
     }
   }, [scrollKey])
 
+  useEffect(() => {
+    setReferencePreview(null)
+  }, [activeConversationId])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!project?.path) {
+      setAvailableSkills([])
+      return
+    }
+    invoke<AvailableAgentSkill[]>("agent_list_skills", { projectPath: project.path })
+      .then((skills) => {
+        if (cancelled) return
+        const enabled = enabledSkillIds(skills, useChatStore.getState().disabledSkills)
+        const enabledSkills = skills.filter((skill) => enabled.has(skill.id))
+        setAvailableSkills(enabledSkills)
+        const current = useChatStore.getState().selectedSkills
+        const filtered = current.filter((name) => enabled.has(name))
+        if (filtered.length !== current.length) {
+          setSelectedSkills(filtered)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSkills([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [project?.path, disabledSkills, setSelectedSkills])
+
   const handleSend = useCallback(
     async (
       text: string,
       images: MessageImage[] = [],
-      options?: ChatSendOptions,
+      options?: InternalChatSendOptions,
     ) => {
       const sendOptions = options ?? {
         useWebSearch: useChatStore.getState().useWebSearch,
         useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
         agentMode: useChatStore.getState().agentMode,
+        skills: useChatStore.getState().selectedSkills,
+        skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
       }
+      const allowedSkills = enabledSkillIds(
+        availableSkills,
+        useChatStore.getState().disabledSkills,
+      )
+      const requestedSkillMode = sendOptions.skillMode ?? (
+        sendOptions.skills.length > 0 ? "explicit" : "auto"
+      )
+      const requestSkills = requestedSkillMode === "auto" && sendOptions.skills.length === 0
+        ? Array.from(allowedSkills)
+        : sendOptions.skills.filter((id) => allowedSkills.has(id))
       // Auto-create a conversation if none is active
       let convId = useChatStore.getState().activeConversationId
       if (!convId) {
         convId = createConversation()
       }
 
-      addMessage("user", text, images)
+      if (!sendOptions.suppressUserMessage) {
+        addMessageToConversation(convId, "user", text, images)
+      }
+      setStreamingConversationId(convId)
       setStreaming(true)
       setAgentEvents([])
       let finalized = false
@@ -373,15 +530,17 @@ export function ChatPanel() {
               message: t("chat.agent.routing"),
             },
           ])
-          const activeConvMessages = useChatStore.getState().getActiveMessages()
+          const visibleHistory = conversationMessages(convId)
             .filter((m) => m.role === "user" || m.role === "assistant")
-            .slice(0, -1)
-            .slice(-maxHistoryMessages)
-            .map((m) => ({ role: m.role, content: m.content }))
+          const activeConvMessages = sendOptions.historyOverride
+            ?? (sendOptions.suppressUserMessage ? visibleHistory : visibleHistory.slice(0, -1))
+              .slice(-maxHistoryMessages)
+              .map((m) => ({ role: m.role, content: m.content }))
           let accumulated = ""
           const references: MessageReference[] = []
           const backendEvents: BackendAgentToolEvent[] = []
           const seenRefs = new Set<string>()
+          let pendingUserInputRequest: ChatUserInputRequest | undefined
           let streamFinished = false
           let streamUnlisten: (() => void) | null = null
           let resolveStream: (() => void) | null = null
@@ -391,20 +550,33 @@ export function ChatPanel() {
             rejectStream = reject
           })
           void streamDone.catch(() => {})
-          const timeout = window.setTimeout(() => {
-            if (!streamFinished) {
-              streamFinished = true
-              rejectStream?.(new Error("Agent stream timed out"))
+          const streamIdleTimeoutMs = agentStreamIdleTimeoutMs(sendOptions, requestSkills.length)
+          let timeout: number | undefined
+          const clearStreamTimeout = () => {
+            if (timeout !== undefined) {
+              window.clearTimeout(timeout)
+              timeout = undefined
             }
-          }, 240_000)
+          }
+          const resetStreamTimeout = () => {
+            clearStreamTimeout()
+            timeout = window.setTimeout(() => {
+              if (!streamFinished) {
+                streamFinished = true
+                rejectStream?.(new Error("Agent stream timed out"))
+              }
+            }, streamIdleTimeoutMs)
+          }
+          resetStreamTimeout()
           streamUnlisten = await listen<BackendAgentEventPayload>("agent-event", (event) => {
             const payload = event.payload
             if (payload.sessionId !== convId || payload.runId !== backendRunId || !isCurrentRun()) return
+            resetStreamTimeout()
             const agentEvent = payload.event
             if (agentEvent.type === "done") {
               if (!streamFinished) {
                 streamFinished = true
-                window.clearTimeout(timeout)
+                clearStreamTimeout()
                 resolveStream?.()
               }
               return
@@ -423,6 +595,16 @@ export function ChatPanel() {
               }
               return
             }
+            if (agentEvent.type === "userInputRequired" && agentEvent.request) {
+              pendingUserInputRequest = agentEvent.request
+              if (!accumulated.trim()) {
+                const intro = agentEvent.request.description
+                  || t("chat.userInputRequiredDescription", { defaultValue: "Please provide the requested information to continue." })
+                accumulated = intro
+                appendStreamToken(intro)
+              }
+              return
+            }
             if (agentEvent.type === "toolStart" && agentEvent.tool) {
               const toolEvent: BackendAgentToolEvent = {
                 tool: agentEvent.tool,
@@ -435,9 +617,10 @@ export function ChatPanel() {
             }
             if (agentEvent.type === "toolEnd" && agentEvent.tool) {
               const failed = typeof agentEvent.output === "string" && agentEvent.output.startsWith("failed:")
+              const skipped = typeof agentEvent.output === "string" && agentEvent.output.startsWith("approval required:")
               const toolEvent: BackendAgentToolEvent = {
                 tool: agentEvent.tool,
-                status: failed ? "failed" : "completed",
+                status: failed ? "failed" : skipped ? "available" : "completed",
                 detail: agentEvent.output,
               }
               backendEvents.push(toolEvent)
@@ -454,7 +637,7 @@ export function ChatPanel() {
               setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
               if (!streamFinished) {
                 streamFinished = true
-                window.clearTimeout(timeout)
+                clearStreamTimeout()
                 rejectStream?.(new Error(agentEvent.message))
               }
             }
@@ -476,6 +659,11 @@ export function ChatPanel() {
                 topK: sendOptions.agentMode === "deep" ? 8 : 5,
                 includeContent: sendOptions.agentMode === "deep",
                 history: activeConvMessages,
+                historyExplicit: true,
+                skills: requestSkills,
+                skillMode: requestedSkillMode,
+                approvedShellCommands: sendOptions.approvedShellCommands ?? [],
+                shellCommand: sendOptions.shellCommand,
                 images: images.map((image) => ({
                   mediaType: image.mediaType,
                   dataBase64: image.dataBase64,
@@ -484,7 +672,7 @@ export function ChatPanel() {
             })
             await streamDone
           } finally {
-            window.clearTimeout(timeout)
+            clearStreamTimeout()
             streamUnlisten?.()
           }
           if (!isCurrentRun()) return
@@ -493,18 +681,32 @@ export function ChatPanel() {
             .map((ref) => ({ title: ref.title, path: ref.path }))
           const steps = backendEvents.map(backendToolToAgentStep)
           finalized = true
-          finalizeStream(accumulated, references, steps)
+          finalizeStreamForConversation(convId, accumulated, references, steps, pendingUserInputRequest)
+          if (!pendingUserInputRequest) {
+            autoOpenSingleGeneratedOutput(convId, references)
+          }
           setAgentEvents([])
+          setStreamingConversationId(null)
           abortRef.current = null
           activeRunSessionIdRef.current = null
           activeRunIdRef.current = null
           return
         }
 
-        const activeConvMessages = useChatStore.getState().getActiveMessages()
+        const activeConvMessages = conversationMessages(convId)
           .filter((m) => m.role === "user" || m.role === "assistant")
           .slice(-maxHistoryMessages)
         const priorMessages = activeConvMessages.slice(0, -1)
+        const priorWireMessages = sendOptions.historyOverride
+          ?? chatMessagesToLLM(priorMessages).map((m) => ({
+            role: m.role,
+            content: typeof m.content === "string"
+              ? m.content
+              : m.content
+                  .filter((block) => block.type === "text")
+                  .map((block) => block.text)
+                  .join("\n"),
+          }))
         const backendResponse = await invoke<BackendAgentResponse>("agent_start_turn", {
           projectId: project?.id ?? "current",
           request: {
@@ -520,15 +722,12 @@ export function ChatPanel() {
             },
             topK: sendOptions.agentMode === "deep" ? 8 : 5,
             includeContent: sendOptions.agentMode === "deep",
-            history: chatMessagesToLLM(priorMessages).map((m) => ({
-              role: m.role,
-              content: typeof m.content === "string"
-                ? m.content
-                : m.content
-                    .filter((block) => block.type === "text")
-                    .map((block) => block.text)
-                    .join("\n"),
-            })),
+            skills: requestSkills,
+            skillMode: requestedSkillMode,
+            historyExplicit: true,
+            approvedShellCommands: sendOptions.approvedShellCommands ?? [],
+            shellCommand: sendOptions.shellCommand,
+            history: priorWireMessages,
             images: images.map((image) => ({
               mediaType: image.mediaType,
               dataBase64: image.dataBase64,
@@ -544,6 +743,25 @@ export function ChatPanel() {
         lastQueryPages = backendReferences
           .filter((ref) => ref.kind === "wiki")
           .map((ref) => ({ title: ref.title, path: ref.path }))
+
+        if (backendResponse.userInputRequest) {
+          finalized = true
+          finalizeStreamForConversation(
+            convId,
+            backendResponse.message
+              ? backendResponseText(backendResponse)
+              : (backendResponse.userInputRequest.description ?? t("chat.userInputRequiredDescription", { defaultValue: "Please provide the requested information to continue." })),
+            backendReferences,
+            backendSteps,
+            backendResponse.userInputRequest,
+          )
+          setAgentEvents([])
+          setStreamingConversationId(null)
+          abortRef.current = null
+          activeRunSessionIdRef.current = null
+          activeRunIdRef.current = null
+          return
+        }
 
         const contextText = [
           "You have access to the current LLM Wiki project context below. Use it as retrieved evidence when it is relevant.",
@@ -567,7 +785,7 @@ export function ChatPanel() {
             role: "system",
             content: "Answer using the provided LLM Wiki context and references. If the context is insufficient, say what is missing instead of inventing details.",
           },
-          ...chatMessagesToLLM(priorMessages),
+          ...(sendOptions.historyOverride ?? chatMessagesToLLM(priorMessages)),
           { role: "user", content: userContent },
         ]
 
@@ -637,8 +855,10 @@ export function ChatPanel() {
         if (!isCurrentRun()) return
         closeReasoning()
         finalized = true
-        finalizeStream(accumulated, backendReferences, backendSteps)
+        finalizeStreamForConversation(convId, accumulated, backendReferences, backendSteps)
+        autoOpenSingleGeneratedOutput(convId, backendReferences)
         setAgentEvents([])
+        setStreamingConversationId(null)
         abortRef.current = null
         activeRunSessionIdRef.current = null
         activeRunIdRef.current = null
@@ -648,21 +868,23 @@ export function ChatPanel() {
           if (isAbortLikeError(err) || runIdRef.current !== runId) {
             setStreaming(false)
             setAgentEvents([])
+            setStreamingConversationId(null)
             abortRef.current = null
             activeRunSessionIdRef.current = null
             activeRunIdRef.current = null
             return
           }
           const message = err instanceof Error ? err.message : String(err)
-          finalizeStream(`Error: ${message}`, undefined)
+          finalizeStreamForConversation(convId, `Error: ${message}`, undefined)
           setAgentEvents([])
+          setStreamingConversationId(null)
         }
         abortRef.current = null
         activeRunSessionIdRef.current = null
         activeRunIdRef.current = null
       }
     },
-    [project, llmConfig, searchApiConfig, addMessage, setStreaming, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages, t],
+    [project, llmConfig, searchApiConfig, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, maxHistoryMessages, t, availableSkills, autoOpenSingleGeneratedOutput],
   )
 
   const handleStop = useCallback(() => {
@@ -682,10 +904,11 @@ export function ChatPanel() {
     activeRunIdRef.current = null
     setStreaming(false)
     setAgentEvents([])
+    setStreamingConversationId(null)
   }, [project, setStreaming])
 
   const handleRegenerate = useCallback(async () => {
-    if (isStreaming) return
+    if (activeStreaming) return
     // Find the last user message in active conversation
     const active = useChatStore.getState().getActiveMessages()
     const lastUserMsg = [...active].reverse().find((m) => m.role === "user")
@@ -709,7 +932,89 @@ export function ChatPanel() {
     // Re-send with the original text AND images so a regenerated turn
     // keeps the same vision context.
     handleSend(lastUserMsg.content, lastUserMsg.images ?? [])
-  }, [isStreaming, removeLastAssistantMessage, handleSend])
+  }, [activeStreaming, removeLastAssistantMessage, handleSend])
+
+  const handleApproveShellCommand = useCallback(async (command: string, assistantMessageId: string) => {
+    if (!command.trim() || approvingShellMessageId) return
+    const active = useChatStore.getState().getActiveMessages()
+    const assistantIndex = active.findIndex((message) => message.id === assistantMessageId)
+    if (assistantIndex <= 0) {
+      console.warn("[chat] shell approval ignored: assistant message not found", assistantMessageId)
+      return
+    }
+    const priorUser = [...active.slice(0, assistantIndex)]
+      .reverse()
+      .find((message) => message.role === "user")
+    if (!priorUser) {
+      console.warn("[chat] shell approval ignored: no prior user message")
+      return
+    }
+    const assistantMessage = active[assistantIndex]
+    const resumeHistory = [
+      ...compactChatHistoryForResume(active.slice(0, assistantIndex), maxHistoryMessages),
+      {
+        role: "assistant" as const,
+        content: [
+          "The previous Agent turn stopped at a shell approval boundary.",
+          "Preserved tool progress before approval:",
+          summarizeAgentStepsForResume(assistantMessage.agentSteps),
+          "",
+          assistantMessage.content,
+        ].join("\n"),
+      },
+    ]
+    const resumeMessage = [
+      "Continue the same Agent task from the preserved tool progress. The user approved the pending shell command; execute only that approved command first, then continue from its result. Do not restart completed setup, file reads, or workspace writes unless the command result proves they are invalid.",
+    ].join("\n")
+    setApprovingShellMessageId(assistantMessageId)
+    // Approval is a continuation of a turn that has already stopped at a
+    // permission boundary. Clear any stale streaming state before resuming so a
+    // delayed store update cannot make the button feel inert.
+    abortRef.current?.abort()
+    abortRef.current = null
+    activeRunSessionIdRef.current = null
+    activeRunIdRef.current = null
+    setStreaming(false)
+    try {
+      await handleSend(resumeMessage, priorUser.images ?? [], {
+        useWebSearch: useChatStore.getState().useWebSearch,
+        useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
+        agentMode: useChatStore.getState().agentMode,
+        skills: useChatStore.getState().selectedSkills,
+        skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
+        approvedShellCommands: [command.trim()],
+        shellCommand: command.trim(),
+        suppressUserMessage: true,
+        historyOverride: resumeHistory,
+      })
+    } finally {
+      setApprovingShellMessageId(null)
+    }
+  }, [approvingShellMessageId, handleSend, setStreaming])
+
+  const handleSubmitUserInput = useCallback((request: ChatUserInputRequest, answers: Record<string, unknown>) => {
+    if (activeStreaming) return false
+    const answerLines = request.fields.map((field) => {
+      const value = answers[field.id]
+      const rendered = Array.isArray(value) ? value.join(", ") : String(value ?? "")
+      return `- ${field.label} (${field.id}): ${rendered || "(empty)"}`
+    })
+    const resumeMessage = [
+      `User provided answers for "${request.title}".`,
+      "",
+      ...answerLines,
+      "",
+      "Continue the previous task using these answers. Do not ask the same questions again unless required information is still missing.",
+    ].join("\n")
+    handleSend(resumeMessage, [], {
+      useWebSearch: useChatStore.getState().useWebSearch,
+      useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
+      agentMode: useChatStore.getState().agentMode,
+      skills: useChatStore.getState().selectedSkills,
+      skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
+    })
+    return true
+  }, [handleSend, activeStreaming])
 
   const handleWriteToWiki = useCallback(async () => {
     if (!project) return
@@ -723,7 +1028,7 @@ export function ChatPanel() {
   }, [project, llmConfig])
 
   const hasAssistantMessages = activeMessages.some((m) => m.role === "assistant")
-  const showWriteButton = mode === "ingest" && !isStreaming && hasAssistantMessages
+  const showWriteButton = mode === "ingest" && !activeStreaming && hasAssistantMessages
 
   return (
     <div className="flex h-full flex-row overflow-hidden">
@@ -753,13 +1058,19 @@ export function ChatPanel() {
                     <ChatMessage
                       key={msg.id}
                       message={msg}
-                      isLastAssistant={isLastAssistant && !isStreaming}
+                      isLastAssistant={isLastAssistant && !activeStreaming}
                       onRegenerate={isLastAssistant ? handleRegenerate : undefined}
                       onOpenReferencePreview={setReferencePreview}
+                      onApproveShellCommand={
+                        isLastAssistant && approvingShellMessageId !== msg.id
+                          ? handleApproveShellCommand
+                          : undefined
+                      }
+                      onSubmitUserInput={isLastAssistant ? handleSubmitUserInput : undefined}
                     />
                   )
                 })}
-                {isStreaming && <StreamingMessage content={streamingContent} agentEvents={agentEvents} />}
+                {activeStreaming && <StreamingMessage content={streamingContent} agentEvents={activeAgentEvents} />}
                 <div ref={bottomRef} />
               </div>
             </div>
@@ -783,13 +1094,16 @@ export function ChatPanel() {
         <ChatInput
           onSend={handleSend}
           onStop={handleStop}
-          isStreaming={isStreaming}
+          isStreaming={activeStreaming}
           useWebSearch={useWebSearch}
           useAnyTxtSearch={useAnyTxtSearch}
           agentMode={agentMode}
+          availableSkills={availableSkills}
+          selectedSkills={selectedSkills}
           onUseWebSearchChange={setUseWebSearch}
           onUseAnyTxtSearchChange={setUseAnyTxtSearch}
           onAgentModeChange={setAgentMode}
+          onSelectedSkillsChange={setSelectedSkills}
           anyTxtAvailable={anyTxtAvailable}
           imageInputAvailable={imageInputAvailable}
           placeholder={

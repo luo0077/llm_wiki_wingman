@@ -30,6 +30,10 @@ impl PermissionPolicy {
                 AgentCapability::SearchAnyTxt,
                 AgentCapability::WriteWiki,
                 AgentCapability::Network,
+                // Process remains inert unless AgentChatRequest carries a
+                // separately approved exact shell command. Do not populate that
+                // approval list from model output or persisted conversation data.
+                AgentCapability::Process,
             ],
         }
     }
@@ -57,5 +61,6 @@ mod tests {
         assert!(policy.allows(AgentCapability::SearchWiki));
         assert!(policy.allows(AgentCapability::Network));
         assert!(policy.allows(AgentCapability::WriteWiki));
+        assert!(policy.allows(AgentCapability::Process));
     }
 }

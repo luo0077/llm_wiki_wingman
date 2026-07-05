@@ -18,6 +18,10 @@ pub enum QueryIntent {
 #[serde(rename_all = "camelCase")]
 pub struct RouterDecision {
     pub intent: QueryIntent,
+    // Compatibility field for existing API/debug consumers. The router no
+    // longer turns this on from message shape; wiki retrieval is selected by
+    // the model planner, with a runtime fallback only when the planner is not
+    // available.
     pub should_search_wiki: bool,
     pub should_hint_web: bool,
     pub should_hint_anytxt: bool,
@@ -74,15 +78,16 @@ pub fn route_query(message: &str, mode: AgentMode, tools: &AgentToolOptions) -> 
         QueryIntent::NeedsExternalSearch
     } else if conversational {
         QueryIntent::SimpleConversational
-    } else if trimmed.ends_with('?') || trimmed.ends_with('？') || trimmed.len() > 24 {
-        QueryIntent::NeedsInternalSearch
     } else {
         QueryIntent::Ambiguous
     };
 
-    let should_search_wiki = tools.wiki
-        && !matches!(intent, QueryIntent::SimpleConversational)
-        && !matches!(mode, AgentMode::Fast);
+    // This router is intentionally conservative. It may label obvious user
+    // hints for the final prompt, but it must not infer retrieval from message
+    // shape such as length or a question mark. Tool execution is decided by the
+    // model planner so capability/meta questions can be answered from the
+    // runtime context without an unnecessary wiki search.
+    let should_search_wiki = false;
 
     RouterDecision {
         intent,
@@ -105,7 +110,10 @@ pub fn route_query(message: &str, mode: AgentMode, tools: &AgentToolOptions) -> 
             QueryIntent::NeedsInternalSearch => {
                 "User question likely benefits from project retrieval.".to_string()
             }
-            QueryIntent::Ambiguous => "Ambiguous request; keep local wiki available.".to_string(),
+            QueryIntent::Ambiguous => {
+                "Ambiguous request; let the tool planner decide whether retrieval is useful."
+                    .to_string()
+            }
         },
     }
 }
@@ -119,7 +127,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn router_detects_external_search_hint_without_forcing_wiki_off() {
+    fn router_detects_external_search_hint_without_forcing_wiki_on() {
         let decision = route_query(
             "Search the web for latest policy updates",
             AgentMode::Standard,
@@ -130,17 +138,18 @@ mod tests {
             },
         );
         assert_eq!(decision.intent, QueryIntent::NeedsExternalSearch);
-        assert!(decision.should_search_wiki);
+        assert!(!decision.should_search_wiki);
         assert!(decision.should_hint_web);
     }
 
     #[test]
-    fn fast_mode_skips_pre_search() {
+    fn router_does_not_force_search_from_question_shape() {
         let decision = route_query(
-            "What does the project say about embeddings?",
-            AgentMode::Fast,
+            "你现在有哪些 skill 可以使用？",
+            AgentMode::Standard,
             &AgentToolOptions::default(),
         );
+        assert_eq!(decision.intent, QueryIntent::Ambiguous);
         assert!(!decision.should_search_wiki);
     }
 }

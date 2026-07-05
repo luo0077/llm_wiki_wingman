@@ -38,7 +38,34 @@ export type ChatAgentToolName =
   | "graph_search"
   | "web_search"
   | "anytxt_search"
+  | "shell_exec"
   | "unknown_tool"
+
+export interface ChatUserInputOption {
+  label: string
+  value: string
+  description?: string
+  recommended?: boolean
+}
+
+export type ChatUserInputFieldType = "single" | "multi" | "text" | "textarea" | "confirm"
+
+export interface ChatUserInputField {
+  id: string
+  type: ChatUserInputFieldType
+  label: string
+  description?: string
+  placeholder?: string
+  options?: ChatUserInputOption[]
+  defaultValue?: unknown
+}
+
+export interface ChatUserInputRequest {
+  requestId: string
+  title: string
+  description?: string
+  fields: ChatUserInputField[]
+}
 
 export interface ChatAgentStep {
   id: string

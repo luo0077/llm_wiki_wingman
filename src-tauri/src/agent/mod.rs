@@ -16,6 +16,7 @@ pub mod session;
 pub mod skills;
 pub mod tools;
 pub mod types;
+pub mod workspace;
 
 pub use runtime::AgentRuntime;
 pub use types::AgentChatRequest;

@@ -89,7 +89,7 @@ async fn agent_start_turn(
     }
     let active_run_id = request.run_id.clone().unwrap_or_default();
     if let Some(session_id) = request.session_id.clone() {
-        if request.history.is_empty() {
+        if request.history.is_empty() && !request.history_explicit {
             request.history = app
                 .state::<agent::session::AgentSessionStore>()
                 .recent_messages(&project.path, &session_id, 12)
@@ -174,7 +174,7 @@ async fn agent_start_turn_stream(
         request.run_id = Some(format!("run_{}", Uuid::new_v4()));
     }
     let active_run_id = request.run_id.clone().unwrap_or_default();
-    if request.history.is_empty() {
+    if request.history.is_empty() && !request.history_explicit {
         request.history = app
             .state::<agent::session::AgentSessionStore>()
             .recent_messages(&project.path, &active_session_id, 12)
@@ -647,6 +647,7 @@ pub fn run() {
             agent_cancel_turn,
             agent_get_session,
             agent_list_sessions,
+            agent::skills::agent_list_skills,
             mcp_server_entry_path,
             commands::vectorstore::vector_upsert,
             commands::vectorstore::vector_search,
