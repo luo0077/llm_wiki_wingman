@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { BookOpen, Plus, Trash2, MessageSquare, X } from "lucide-react"
+import { BookOpen, Plus, Trash2, MessageSquare, X, Maximize2, FolderOpen, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatMessage, StreamingMessage, useSourceFiles, type ChatReferencePreview } from "./chat-message"
 import { ChatInput, type ChatSendOptions } from "./chat-input"
@@ -388,44 +388,66 @@ export function ChatPanel() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const [agentEvents, setAgentEvents] = useState<ChatAgentEvent[]>([])
   const [referencePreview, setReferencePreview] = useState<ChatReferencePreview | null>(null)
+  const [generatedOutputPreviews, setGeneratedOutputPreviews] = useState<ChatReferencePreview[]>([])
+  const [generatedOutputPreview, setGeneratedOutputPreview] = useState<ChatReferencePreview | null>(null)
   const [referencePreviewWidth, setReferencePreviewWidth] = useState(420)
   const [availableSkills, setAvailableSkills] = useState<AvailableAgentSkill[]>([])
   const [approvingShellMessageId, setApprovingShellMessageId] = useState<string | null>(null)
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
-  const openGeneratedOutputPreview = useCallback(async (ref: MessageReference) => {
-    if (!project) return
+  const buildGeneratedOutputPreview = useCallback(async (ref: MessageReference): Promise<ChatReferencePreview | null> => {
+    if (!project) return null
     const outputPath = projectAbsolutePath(project.path, ref.path)
     try {
       const category = getFileCategory(outputPath)
       const shouldReadContent = isTextReadable(category) || category === "pdf"
       const content = shouldReadContent ? await readFile(outputPath) : ""
-      setReferencePreview({
+      return {
         title: ref.title || getFileName(outputPath),
         path: outputPath,
         source: ref.source ?? "Workspace",
         content,
         snippet: ref.snippet,
-      })
+      }
     } catch (err) {
       console.warn("[chat] failed to auto-open generated output:", err)
-      setReferencePreview({
+      return {
         title: ref.title || getFileName(outputPath),
         path: outputPath,
         source: ref.source ?? "Workspace",
         content: `Unable to load generated file: ${ref.path}`,
         snippet: ref.snippet,
-      })
+      }
     }
   }, [project])
   const autoOpenSingleGeneratedOutput = useCallback((conversationId: string, references?: MessageReference[]) => {
     if (useChatStore.getState().activeConversationId !== conversationId) return
     const outputs = (references ?? []).filter((ref) => ref.kind === "workspace")
-    if (outputs.length !== 1) return
-    void openGeneratedOutputPreview(outputs[0])
-  }, [openGeneratedOutputPreview])
+    if (outputs.length === 0 || !project) return
+    const previews = outputs.map((ref) => {
+      const outputPath = projectAbsolutePath(project.path, ref.path)
+      return {
+        title: ref.title || getFileName(outputPath),
+        path: outputPath,
+        source: ref.source ?? "Workspace",
+        content: "",
+        snippet: ref.snippet,
+      }
+    })
+    setReferencePreview(null)
+    setGeneratedOutputPreviews(previews)
+    if (outputs.length === 1) {
+      void buildGeneratedOutputPreview(outputs[0]).then((preview) => {
+        if (preview) {
+          setGeneratedOutputPreviews([preview])
+          setGeneratedOutputPreview(preview)
+        }
+      })
+    }
+  }, [buildGeneratedOutputPreview, project])
   const activeStreaming = Boolean(isStreaming && activeConversationId && streamingConversationId === activeConversationId)
   const activeAgentEvents = activeStreaming ? agentEvents : []
   const lastMessage = activeMessages[activeMessages.length - 1]
+  const lastAssistantMessage = [...activeMessages].reverse().find((message) => message.role === "assistant")
   const scrollKey = [
     activeConversationId ?? "",
     activeMessages.length,
@@ -444,7 +466,69 @@ export function ChatPanel() {
 
   useEffect(() => {
     setReferencePreview(null)
+    setGeneratedOutputPreviews([])
+    setGeneratedOutputPreview(null)
   }, [activeConversationId])
+
+  useEffect(() => {
+    if (!project || activeStreaming || !lastAssistantMessage) return
+    const outputs = (lastAssistantMessage.references ?? []).filter((ref) => ref.kind === "workspace")
+    if (outputs.length === 0) return
+    const previews = outputs.map((ref) => {
+      const outputPath = projectAbsolutePath(project.path, ref.path)
+      return {
+        title: ref.title || getFileName(outputPath),
+        path: outputPath,
+        source: ref.source ?? "Workspace",
+        content: "",
+        snippet: ref.snippet,
+      }
+    })
+    const currentKey = generatedOutputPreviews.map((preview) => preview.path).join("\n")
+    const nextKey = previews.map((preview) => preview.path).join("\n")
+    if (currentKey === nextKey) return
+    setReferencePreview(null)
+    setGeneratedOutputPreviews(previews)
+  }, [activeStreaming, generatedOutputPreviews, lastAssistantMessage, project])
+
+  const loadGeneratedOutputPreview = useCallback(async (preview: ChatReferencePreview): Promise<ChatReferencePreview> => {
+    const category = getFileCategory(preview.path)
+    const shouldReadContent = isTextReadable(category) || category === "pdf"
+    if (!shouldReadContent || preview.content) return preview
+    try {
+      return {
+        ...preview,
+        content: await readFile(preview.path),
+      }
+    } catch {
+      return preview
+    }
+  }, [])
+
+  const openGeneratedOutputModal = useCallback((preview: ChatReferencePreview) => {
+    void loadGeneratedOutputPreview(preview).then(setGeneratedOutputPreview)
+  }, [loadGeneratedOutputPreview])
+
+  const handleOpenReferencePreview = useCallback((preview: ChatReferencePreview, relatedPreviews?: ChatReferencePreview[]) => {
+    const isGeneratedOutput = preview.source === "Workspace"
+      || normalizePath(preview.path).split("/").includes("agent-workspace")
+    if (!isGeneratedOutput) {
+      setGeneratedOutputPreviews([])
+      setGeneratedOutputPreview(null)
+      setReferencePreview(preview)
+      return
+    }
+    const previews = relatedPreviews && relatedPreviews.length > 0
+      ? relatedPreviews.map((item) =>
+          item.path === preview.path
+            ? { ...item, content: preview.content }
+            : item
+        )
+      : [preview]
+    setReferencePreview(null)
+    setGeneratedOutputPreviews(previews)
+    openGeneratedOutputModal(preview)
+  }, [openGeneratedOutputModal])
 
   useEffect(() => {
     let cancelled = false
@@ -1060,7 +1144,7 @@ export function ChatPanel() {
                       message={msg}
                       isLastAssistant={isLastAssistant && !activeStreaming}
                       onRegenerate={isLastAssistant ? handleRegenerate : undefined}
-                      onOpenReferencePreview={setReferencePreview}
+                      onOpenReferencePreview={handleOpenReferencePreview}
                       onApproveShellCommand={
                         isLastAssistant && approvingShellMessageId !== msg.id
                           ? handleApproveShellCommand
@@ -1122,6 +1206,122 @@ export function ChatPanel() {
           onClose={() => setReferencePreview(null)}
         />
       )}
+      {generatedOutputPreviews.length > 0 && (
+        <GeneratedOutputsPanel
+          outputs={generatedOutputPreviews}
+          onOpen={openGeneratedOutputModal}
+          onClose={() => {
+            setGeneratedOutputPreviews([])
+            setGeneratedOutputPreview(null)
+          }}
+        />
+      )}
+      {generatedOutputPreview && (
+        <GeneratedOutputPreviewDialog
+          preview={generatedOutputPreview}
+          onClose={() => setGeneratedOutputPreview(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function GeneratedOutputsPanel({
+  outputs,
+  onOpen,
+  onClose,
+}: {
+  outputs: ChatReferencePreview[]
+  onOpen: (preview: ChatReferencePreview) => void
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <aside className="flex h-full w-[280px] shrink-0 flex-col border-l bg-background">
+      <div className="flex min-h-10 items-center gap-2 border-b px-3 py-2">
+        <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-medium">{t("chat.generatedOutputs")}</div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">
+            {t("chat.generatedOutputCount", { count: outputs.length })}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={t("chat.closeGeneratedOutputs")}
+          aria-label={t("chat.closeGeneratedOutputs")}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        <div className="space-y-1">
+          {outputs.map((output) => {
+            const title = output.title || getFileName(output.path)
+            return (
+              <button
+                key={output.path}
+                type="button"
+                onClick={() => onOpen(output)}
+                className="group flex w-full items-start gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
+                title={output.path}
+              >
+                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium text-foreground">{title}</span>
+                  <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{output.path}</span>
+                </span>
+                <Maximize2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function GeneratedOutputPreviewDialog({
+  preview,
+  onClose,
+}: {
+  preview: ChatReferencePreview
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const displayTitle = preview.title || getFileName(preview.path)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [onClose])
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6">
+      <div className="flex h-[86vh] w-[80vw] min-w-0 max-w-[1600px] flex-col overflow-hidden rounded-xl border bg-background shadow-2xl">
+        <div className="flex min-h-12 items-center gap-3 border-b px-4 py-2">
+          <Maximize2 className="h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium" title={displayTitle}>{displayTitle}</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted-foreground" title={preview.path}>{preview.path}</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={t("chat.closeGeneratedOutputPreview")}
+            aria-label={t("chat.closeGeneratedOutputPreview")}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <ChatReferencePreviewContent preview={preview} />
+        </div>
+      </div>
     </div>
   )
 }
@@ -1205,19 +1405,23 @@ function ChatReferencePreviewPanel({
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {preview.external ? (
-          <ExternalReferencePreview preview={preview} />
-        ) : getFileCategory(preview.path) === "markdown" ? (
-          <ChatMarkdownReferencePreview preview={preview} />
-        ) : (
-          <FilePreview
-            key={preview.path}
-            filePath={preview.path}
-            textContent={preview.content}
-          />
-        )}
+        <ChatReferencePreviewContent preview={preview} />
       </div>
     </aside>
+  )
+}
+
+function ChatReferencePreviewContent({ preview }: { preview: ChatReferencePreview }) {
+  if (preview.external) return <ExternalReferencePreview preview={preview} />
+  if (getFileCategory(preview.path) === "markdown") {
+    return <ChatMarkdownReferencePreview preview={preview} />
+  }
+  return (
+    <FilePreview
+      key={preview.path}
+      filePath={preview.path}
+      textContent={preview.content}
+    />
   )
 }
 

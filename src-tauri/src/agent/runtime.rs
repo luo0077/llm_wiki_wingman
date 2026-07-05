@@ -2686,6 +2686,9 @@ fn normalize_agent_loop_action(mut action: AgentLoopAction) -> AgentLoopAction {
         action.tool = Some(trimmed_action.to_string());
         action.action = "tool".to_string();
     }
+    if action.tool.as_deref().is_some_and(is_agent_loop_tool_name) {
+        action.action = "tool".to_string();
+    }
     if action.action.trim().is_empty() {
         action.action = if action.tool.is_some() {
             "tool".to_string()
@@ -4262,6 +4265,17 @@ mod tests {
         assert_eq!(action.tool.as_deref(), Some("workspace.append_file"));
         assert_eq!(action.path.as_deref(), Some("ppt/index.html"));
         assert_eq!(action.content.as_deref(), Some("</html>"));
+    }
+
+    #[test]
+    fn agent_loop_action_treats_valid_tool_field_as_tool_action() {
+        let action = parse_agent_loop_action(
+            r#"{"action":"skill","tool":"skill.read_file","path":"references/themes.md"}"#,
+        );
+
+        assert_eq!(action.action, "tool");
+        assert_eq!(action.tool.as_deref(), Some("skill.read_file"));
+        assert_eq!(action.path.as_deref(), Some("references/themes.md"));
     }
 
     #[test]

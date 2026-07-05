@@ -73,7 +73,7 @@ interface ChatMessageProps {
   message: DisplayMessage
   isLastAssistant?: boolean
   onRegenerate?: () => void
-  onOpenReferencePreview?: (preview: ChatReferencePreview) => void
+  onOpenReferencePreview?: (preview: ChatReferencePreview, relatedPreviews?: ChatReferencePreview[]) => void
   onApproveShellCommand?: (command: string, assistantMessageId: string) => void
   onSubmitUserInput?: (request: ChatUserInputRequest, answers: Record<string, unknown>) => boolean
 }
@@ -682,7 +682,7 @@ function CitedReferencesPanel({
 }: {
   content: string
   savedReferences?: CitedPage[]
-  onOpenReferencePreview?: (preview: ChatReferencePreview) => void
+  onOpenReferencePreview?: (preview: ChatReferencePreview, relatedPreviews?: ChatReferencePreview[]) => void
 }) {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
@@ -828,6 +828,16 @@ function CitedReferencesPanel({
       if (!project) return
       const pp = normalizePath(project.path)
       const workspacePath = projectAbsolutePath(pp, page.path)
+      const relatedOutputPreviews = generatedOutputs.map((output) => {
+        const outputPath = projectAbsolutePath(pp, output.path)
+        return {
+          title: output.title,
+          path: outputPath,
+          source: output.source ?? "Workspace",
+          content: output.path === page.path ? page.snippet ?? "" : "",
+          snippet: output.snippet,
+        }
+      })
       try {
         const category = getFileCategory(workspacePath)
         const shouldReadContent = isTextReadable(category) || category === "pdf"
@@ -839,7 +849,7 @@ function CitedReferencesPanel({
             source: page.source ?? "Workspace",
             content,
             snippet: page.snippet,
-          })
+          }, relatedOutputPreviews)
         } else {
           openFileInPreview(workspacePath, content)
         }
@@ -852,7 +862,7 @@ function CitedReferencesPanel({
             source: page.source ?? "Workspace",
             content: `Unable to load generated file: ${page.path}`,
             snippet: page.snippet,
-          })
+          }, relatedOutputPreviews)
         }
       }
       return
@@ -941,7 +951,7 @@ function CitedReferencesPanel({
     } else {
       openFileInPreview(fallbackPath, fallbackContent)
     }
-  }, [project, onOpenReferencePreview, openFileInPreview])
+  }, [project, generatedOutputs, onOpenReferencePreview, openFileInPreview])
 
   if (citedPages.length === 0 && generatedOutputs.length === 0) return null
 
