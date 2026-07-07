@@ -78,10 +78,27 @@ export async function refreshProjectFileTree(
 
   if (refreshPathIndex) {
     if (!isStillCurrentProject(currentProjectId, normalizedProjectPath)) return
-    listDirectoryWithRetry(normalizedProjectPath, undefined, 3)
-      .then((fullTree) => {
+    // The full project scan hides dot-prefixed entries (`.git`,
+    // `.llm-wiki`, …), which is correct for most of the tree. But
+    // `raw/sources` may hold user-added dotfolders (`.claude`,
+    // `.codex`) whose files back real `sources:` references. Scan
+    // that subtree with `includeHidden` and merge it in so those
+    // sources resolve instead of rendering as "not found". The
+    // raw/sources scan is best-effort — a project without sources
+    // must still get a full index.
+    Promise.all([
+      listDirectoryWithRetry(normalizedProjectPath, undefined, 3),
+      listDirectoryWithRetry(
+        `${normalizedProjectPath}/raw/sources`,
+        { includeHidden: true },
+        3,
+      ).catch(() => [] as FileNode[]),
+    ])
+      .then(([fullTree, rawSourcesTree]) => {
         if (!isStillCurrentProject(currentProjectId, normalizedProjectPath)) return
-        useWikiStore.getState().setProjectPathIndexFromTree(fullTree)
+        useWikiStore
+          .getState()
+          .setProjectPathIndexFromTree([...fullTree, ...rawSourcesTree])
       })
       .catch((err) => {
         console.error("Failed to refresh project path index:", err)

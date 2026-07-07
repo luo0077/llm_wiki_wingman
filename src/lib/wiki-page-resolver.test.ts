@@ -64,6 +64,27 @@ const STRAY_CHILDREN_INDEX = buildProjectPathIndexFromTree([
   },
 ])
 
+describe("buildProjectPathIndexFromTree", () => {
+  it("indexes each path once when overlapping trees are merged", () => {
+    // The full project scan and a hidden raw/sources rescan share the
+    // visible source files; merging them must not create duplicate
+    // filesByName entries, while still surfacing hidden-only files.
+    const rawSourcesRescan: FileNode[] = [
+      dir(`${SOURCES}`, [
+        file(`${SOURCES}/report.pdf`), // duplicate of the full scan
+        dir(`${SOURCES}/.claude`, [file(`${SOURCES}/.claude/memory.md`)]),
+      ]),
+    ]
+    const merged = buildProjectPathIndexFromTree([...TREE, ...rawSourcesRescan])
+
+    expect(merged.filesByName.get("report.pdf")).toHaveLength(1)
+    expect(merged.byPath.has(`${SOURCES}/.claude/memory.md`)).toBe(true)
+    expect(findInTreeByName(merged, "memory.md", `${SOURCES}/`)).toBe(
+      `${SOURCES}/.claude/memory.md`,
+    )
+  })
+})
+
 describe("unwrapWikilink", () => {
   it("unwraps a bare [[target]]", () => {
     expect(unwrapWikilink("[[nh3-n]]")).toEqual({ slug: "nh3-n", label: "nh3-n" })
@@ -262,6 +283,26 @@ describe("resolveSourceName", () => {
     )
     expect(resolveSourceName(INDEX, "wiki/sources/paper.md", SOURCES)).toBe(
       `${WIKI}/sources/paper.md`,
+    )
+  })
+
+  it("resolves a source that lives inside a raw/sources dotfolder", () => {
+    // Real frontmatter shape: sources: [".claude/projects/.../MEMORY.md"].
+    // These only resolve once the hidden raw/sources rescan puts the
+    // dotfolder file into the index.
+    const dotIndex = buildProjectPathIndexFromTree([
+      dir(`${PP}/raw`, [
+        dir(`${SOURCES}`, [
+          dir(`${SOURCES}/.claude`, [
+            dir(`${SOURCES}/.claude/projects`, [
+              file(`${SOURCES}/.claude/projects/MEMORY.md`),
+            ]),
+          ]),
+        ]),
+      ]),
+    ])
+    expect(resolveSourceName(dotIndex, ".claude/projects/MEMORY.md", SOURCES)).toBe(
+      `${SOURCES}/.claude/projects/MEMORY.md`,
     )
   })
 })
