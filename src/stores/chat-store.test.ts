@@ -54,6 +54,29 @@ describe("chat-store conversation isolation", () => {
     expect(useChatStore.getState().isStreaming).toBe(true)
   })
 
+  it("clears stale stream content when creating or switching conversations", () => {
+    const first = useChatStore.getState().createConversation()
+    useChatStore.setState({
+      streamingContent: "old conversation tokens",
+      isStreaming: true,
+    })
+
+    const second = useChatStore.getState().createConversation()
+
+    expect(useChatStore.getState().activeConversationId).toBe(second)
+    expect(useChatStore.getState().streamingContent).toBe("")
+    expect(useChatStore.getState().isStreaming).toBe(false)
+
+    useChatStore.setState({
+      streamingContent: "more stale tokens",
+      isStreaming: true,
+    })
+    useChatStore.getState().setActiveConversation(first)
+
+    expect(useChatStore.getState().activeConversationId).toBe(first)
+    expect(useChatStore.getState().streamingContent).toBe("")
+  })
+
   it("stores selected skills per conversation and starts new conversations empty", () => {
     const first = useChatStore.getState().createConversation()
     useChatStore.getState().setSelectedSkills(["cover-image"])

@@ -128,6 +128,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       conversations: [newConversation, ...state.conversations],
       activeConversationId: id,
+      isStreaming: false,
+      streamingContent: "",
       selectedSkills: [],
     }))
     return id
@@ -151,6 +153,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveConversation: (id) =>
     set((state) => ({
       activeConversationId: id,
+      streamingContent: "",
       selectedSkills: state.conversations.find((conversation) => conversation.id === id)?.selectedSkills ?? [],
     })),
 

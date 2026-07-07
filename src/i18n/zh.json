@@ -321,8 +321,10 @@
         "enableAll": "全部启用",
         "disableAll": "全部禁用",
         "refresh": "重新扫描",
+        "searchPlaceholder": "按名称、ID、描述或来源搜索 Skill...",
         "scanDone": "发现 {{count}} 个 Skill。",
         "empty": "未找到 Skill。请在扫描目录中添加 SKILL.md 后重新扫描。",
+        "noSearchResults": "没有匹配当前搜索的 Skill。",
         "enabled": "已启用",
         "disabled": "已禁用"
       },

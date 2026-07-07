@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { convertFileSrc } from "@tauri-apps/api/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -18,7 +19,7 @@ import type { DisplayMessage, MessageReference } from "@/stores/chat-store"
 import type { FileNode } from "@/types/wiki"
 
 import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
-import { normalizePath, getFileName } from "@/lib/path-utils"
+import { normalizePath, getFileName, isAbsolutePath } from "@/lib/path-utils"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { messageImageToDataUrl } from "@/lib/chat-image-utils"
@@ -33,7 +34,7 @@ import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from
 import type { ChatAgentEvent, ChatAgentEventStage, ChatAgentStep, ChatUserInputField, ChatUserInputRequest } from "@/lib/chat-agent-types"
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
-import { getFileCategory, isTextReadable } from "@/lib/file-types"
+import { getFileCategory, getFileExtension, isTextReadable } from "@/lib/file-types"
 
 // Module-level cache of source file names
 let cachedSourceFiles: string[] = []
@@ -651,8 +652,17 @@ function projectAbsolutePath(projectPath: string, path: string): string {
   const pp = normalizePath(projectPath)
   const normalized = normalizePath(path)
   if (normalized.startsWith(`${pp}/`)) return normalized
-  if (normalized.startsWith("/")) return normalized
+  if (isAbsolutePath(normalized)) return normalized
   return `${pp}/${normalized.replace(/^\/+/, "")}`
+}
+
+function isAgentWorkspacePath(filePath: string): boolean {
+  return normalizePath(filePath).split("/").includes("agent-workspace")
+}
+
+function isGeneratedOutputImage(filePath: string): boolean {
+  const category = getFileCategory(filePath)
+  return category === "image" || (getFileExtension(filePath) === "svg" && isAgentWorkspacePath(filePath))
 }
 
 /**
@@ -983,19 +993,36 @@ function CitedReferencesPanel({
               const refType = getRefType(page.path, page)
               const config = REF_TYPE_CONFIG[refType] ?? REF_TYPE_CONFIG.source
               const Icon = config.icon
+              const absoluteOutputPath = project ? projectAbsolutePath(project.path, page.path) : page.path
+              const isImageOutput = isGeneratedOutputImage(absoluteOutputPath)
+              const imageSrc = isImageOutput ? convertFileSrc(absoluteOutputPath) : null
               return (
                 <div
                   key={page.path}
-                  className="flex w-full items-center gap-1.5 rounded text-left"
+                  className="flex w-full items-start gap-1.5 rounded text-left"
                   title={page.path}
                 >
-                  <span className="text-[10px] text-primary/60 w-4 shrink-0 text-right">[{i + 1}]</span>
+                  <span className="mt-1 text-[10px] text-primary/60 w-4 shrink-0 text-right">[{i + 1}]</span>
                   <button
                     type="button"
                     onClick={() => openCitedPage(page)}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-primary/10 transition-colors"
+                    className="flex min-w-0 flex-1 items-start gap-2 rounded px-1 py-1 text-left hover:bg-primary/10 transition-colors"
                   >
-                    <Icon className={`h-3 w-3 shrink-0 ${config.color}`} />
+                    {imageSrc ? (
+                      <span className="h-14 w-20 shrink-0 overflow-hidden rounded border border-primary/20 bg-background/80">
+                        <img
+                          src={imageSrc}
+                          alt={page.title}
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={(event) => {
+                            event.currentTarget.style.opacity = "0"
+                          }}
+                        />
+                      </span>
+                    ) : (
+                      <Icon className={`mt-0.5 h-3 w-3 shrink-0 ${config.color}`} />
+                    )}
                     <span className="min-w-0 flex-1 text-foreground/90">
                       <span className="block truncate">{page.title}</span>
                       <span className="mt-0.5 block truncate text-[10px] text-muted-foreground/75">

@@ -2156,6 +2156,36 @@ impl AgentRuntime {
             "shell.exec" => {
                 let output: tools::ShellExecToolOutput = serde_json::from_value(value)
                     .map_err(|err| format!("Invalid shell.exec result: {err}"))?;
+                for generated in &output.generated_files {
+                    let reference = AgentReference {
+                        title: Path::new(&generated.path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or(&generated.path)
+                            .to_string(),
+                        path: generated.path.clone(),
+                        kind: "workspace".to_string(),
+                        snippet: Some(format!(
+                            "Generated file written by shell.exec ({} bytes).",
+                            generated.bytes
+                        )),
+                        score: None,
+                    };
+                    push_unique_reference(references, events, event_sink, reference);
+                }
+                let generated_summary = if output.generated_files.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\nGenerated files:\n{}",
+                        output
+                            .generated_files
+                            .iter()
+                            .map(|file| format!("- {}", file.path))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    )
+                };
                 Ok(format!(
                     "`{}` exit={:?} timedOut={}\nstdout:\n{}\nstderr:\n{}",
                     output.command,
@@ -2163,7 +2193,7 @@ impl AgentRuntime {
                     output.timed_out,
                     trim_chars(&output.stdout, 8_000),
                     trim_chars(&output.stderr, 4_000)
-                ))
+                ) + &generated_summary)
             }
             _ => Ok(value.to_string()),
         }
@@ -4862,6 +4892,50 @@ mod tests {
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].kind, "workspace");
         assert_eq!(references[0].path, "agent-workspace/deck/index.html");
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn shell_exec_generated_files_are_added_as_references() {
+        let project = tempdir_for_agent_runtime_test();
+        let runtime = AgentRuntime::new(
+            "project-1",
+            project.to_string_lossy(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let mut references = Vec::new();
+        let mut events = Vec::new();
+
+        let summary = runtime
+            .record_loop_tool_success(
+                "shell.exec",
+                serde_json::json!({
+                    "command": "printf image > images/cover.png",
+                    "exitCode": 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "timedOut": false,
+                    "generatedFiles": [
+                        {
+                            "path": "agent-workspace/images/cover.png",
+                            "bytes": 5
+                        }
+                    ]
+                }),
+                &mut references,
+                &mut events,
+                &None,
+            )
+            .unwrap();
+
+        assert!(summary.contains("Generated files:"));
+        assert!(summary.contains("agent-workspace/images/cover.png"));
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].kind, "workspace");
+        assert_eq!(references[0].path, "agent-workspace/images/cover.png");
         assert_eq!(events.len(), 1);
     }
 

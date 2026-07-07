@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
-import { RefreshCw, Sparkles } from "lucide-react"
+import { RefreshCw, Search, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useChatStore } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -32,9 +32,24 @@ export function SkillsSection() {
   const [skills, setSkills] = useState<AvailableAgentSkill[]>([])
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
 
   const disabled = useMemo(() => new Set(disabledSkills), [disabledSkills])
   const enabledCount = skills.filter((skill) => !disabled.has(skill.id)).length
+  const filteredSkills = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return skills
+    return skills.filter((skill) => {
+      const fields = [
+        skill.name,
+        skill.id,
+        skill.description ?? "",
+        sourceLabel(skill.source, t),
+        skill.source,
+      ]
+      return fields.some((field) => field.toLowerCase().includes(query))
+    })
+  }, [searchQuery, skills, t])
 
   const persist = useCallback(async (nextSelected: string[], nextDisabled: string[]) => {
     if (!project?.path) return
@@ -130,25 +145,39 @@ export function SkillsSection() {
         })}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-muted-foreground">
-          {t("settings.sections.skills.summary", {
-            defaultValue: "{{enabled}} enabled / {{total}} discovered",
-            enabled: enabledCount,
-            total: skills.length,
-          })}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={t("settings.sections.skills.searchPlaceholder", {
+              defaultValue: "Search skills by name, id, description, or source...",
+            })}
+            className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+          />
         </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void setAllEnabled(true)} disabled={skills.length === 0}>
-            {t("settings.sections.skills.enableAll", { defaultValue: "Enable all" })}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => void setAllEnabled(false)} disabled={skills.length === 0}>
-            {t("settings.sections.skills.disableAll", { defaultValue: "Disable all" })}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => void scan()} disabled={loading || !project}>
-            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            {t("settings.sections.skills.refresh", { defaultValue: "Rescan" })}
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm text-muted-foreground">
+            {t("settings.sections.skills.summary", {
+              defaultValue: "{{enabled}} enabled / {{total}} discovered",
+              enabled: enabledCount,
+              total: skills.length,
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => void setAllEnabled(true)} disabled={skills.length === 0}>
+              {t("settings.sections.skills.enableAll", { defaultValue: "Enable all" })}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void setAllEnabled(false)} disabled={skills.length === 0}>
+              {t("settings.sections.skills.disableAll", { defaultValue: "Disable all" })}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void scan()} disabled={loading || !project}>
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              {t("settings.sections.skills.refresh", { defaultValue: "Rescan" })}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -161,9 +190,16 @@ export function SkillsSection() {
             defaultValue: "No skills found. Add SKILL.md files to a scanned folder, then rescan.",
           })}
         </div>
+      ) : filteredSkills.length === 0 ? (
+        <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+          <Search className="mx-auto mb-2 h-5 w-5 opacity-50" />
+          {t("settings.sections.skills.noSearchResults", {
+            defaultValue: "No skills match this search.",
+          })}
+        </div>
       ) : (
         <div className="space-y-2">
-          {skills.map((skill) => {
+          {filteredSkills.map((skill) => {
             const active = !disabled.has(skill.id)
             return (
               <div

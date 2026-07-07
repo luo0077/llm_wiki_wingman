@@ -39,13 +39,30 @@ function App() {
 
   async function hydrateProjectChatStore(proj: WikiProject): Promise<void> {
     try {
+      const activeBeforeLoad = useChatStore.getState().activeConversationId
       const savedChat = await loadChatHistory(proj.path)
       if (!isCurrentProject(proj)) return
+      const stateAfterLoad = useChatStore.getState()
+      const activeChangedDuringLoad = stateAfterLoad.activeConversationId !== activeBeforeLoad
       if (savedChat.conversations.length > 0) {
-        useChatStore.getState().setConversations(savedChat.conversations)
-        useChatStore.getState().setMessages(savedChat.messages)
+        const existingConversations = activeChangedDuringLoad ? stateAfterLoad.conversations : []
+        const existingMessages = activeChangedDuringLoad ? stateAfterLoad.messages : []
+        const mergedConversations = [
+          ...existingConversations,
+          ...savedChat.conversations.filter(
+            (conversation) => !existingConversations.some((existing) => existing.id === conversation.id)
+          ),
+        ]
+        const mergedMessages = [
+          ...existingMessages,
+          ...savedChat.messages.filter(
+            (message) => !existingMessages.some((existing) => existing.id === message.id)
+          ),
+        ]
+        useChatStore.getState().setConversations(mergedConversations)
+        useChatStore.getState().setMessages(mergedMessages)
         const sorted = [...savedChat.conversations].sort((a, b) => b.updatedAt - a.updatedAt)
-        if (sorted[0]) {
+        if (!activeChangedDuringLoad && sorted[0]) {
           useChatStore.getState().setActiveConversation(sorted[0].id)
         }
       }

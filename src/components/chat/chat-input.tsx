@@ -26,7 +26,6 @@ export interface ChatSendOptions {
 }
 
 const AGENT_MODE_OPTIONS: ChatAgentMode[] = ["fast", "standard", "deep", "local_first"]
-const MAX_SLASH_SKILL_RESULTS = 8
 
 export interface ChatSkillOption {
   id: string
@@ -67,7 +66,7 @@ export function filterSlashSkillOptions(
   skills: ChatSkillOption[],
   query: string,
   sourceLabel: (source: string) => string,
-  limit = MAX_SLASH_SKILL_RESULTS,
+  limit = Number.POSITIVE_INFINITY,
 ): ChatSkillOption[] {
   const normalized = query.trim().toLowerCase()
   return skills

@@ -1,10 +1,14 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
 use std::fs;
 use std::fs::OpenOptions;
 use std::future::Future;
+use std::hash::{Hash, Hasher};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::process::Stdio;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -33,6 +37,7 @@ const WEB_SEARCH_TIMEOUT_SECS: u64 = 30;
 const SHELL_EXEC_TIMEOUT_SECS: u64 = 30;
 const MAX_SHELL_COMMAND_CHARS: usize = 4_000;
 const MAX_SHELL_OUTPUT_CHARS: usize = 20_000;
+const MAX_SHELL_GENERATED_FILES: usize = 50;
 const SHELL_OUTPUT_DRAIN_TIMEOUT_SECS: u64 = 1;
 const DEFAULT_ANYTXT_ENDPOINT: &str = "http://127.0.0.1:9920";
 const DEFAULT_ANYTXT_LIMIT: usize = 20;
@@ -280,6 +285,8 @@ pub struct ShellExecToolOutput {
     pub stdout: String,
     pub stderr: String,
     pub timed_out: bool,
+    #[serde(default)]
+    pub generated_files: Vec<WorkspaceWriteOutput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -788,6 +795,8 @@ async fn run_shell_exec(
     let workspace = agent_workspace_path(cwd);
     fs::create_dir_all(&workspace)
         .map_err(|err| format!("shell.exec failed to create {AGENT_WORKSPACE_DIR}: {err}"))?;
+    ensure_project_bound_path(project_path, &workspace)?;
+    let before_files = snapshot_workspace_files(&workspace);
     #[cfg(windows)]
     let mut child = {
         let shell = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd".into());
@@ -848,7 +857,91 @@ async fn run_shell_exec(
         stdout,
         stderr,
         timed_out,
+        generated_files: changed_workspace_files(&workspace, before_files),
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceFileSnapshot {
+    len: u64,
+    modified: Option<SystemTime>,
+    content_hash: Option<u64>,
+}
+
+fn snapshot_workspace_files(workspace: &Path) -> BTreeMap<String, WorkspaceFileSnapshot> {
+    let mut files = BTreeMap::new();
+    for entry in WalkDir::new(workspace).into_iter().filter_map(Result::ok) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(workspace) else {
+            continue;
+        };
+        let Some(rel) = rel.to_str().map(|value| value.replace('\\', "/")) else {
+            continue;
+        };
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        files.insert(
+            rel,
+            WorkspaceFileSnapshot {
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+                content_hash: workspace_file_content_hash(entry.path(), metadata.len()),
+            },
+        );
+    }
+    files
+}
+
+fn workspace_file_content_hash(path: &Path, len: u64) -> Option<u64> {
+    // Shell-generated artifacts can be rewritten faster than some filesystems
+    // update mtimes, especially on Windows/external/network volumes. A bounded
+    // content signature prevents same-size rewrites from disappearing from the
+    // generated-output list without turning every shell command into an
+    // unbounded full-workspace read.
+    const FULL_HASH_LIMIT_BYTES: u64 = 8 * 1024 * 1024;
+    const EDGE_SAMPLE_BYTES: u64 = 64 * 1024;
+
+    let mut file = fs::File::open(path).ok()?;
+    let mut hasher = DefaultHasher::new();
+    len.hash(&mut hasher);
+    if len <= FULL_HASH_LIMIT_BYTES {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).ok()?;
+        bytes.hash(&mut hasher);
+    } else {
+        let sample = EDGE_SAMPLE_BYTES as usize;
+        let mut head = vec![0_u8; sample];
+        file.read_exact(&mut head).ok()?;
+        head.hash(&mut hasher);
+        file.seek(SeekFrom::End(-(EDGE_SAMPLE_BYTES as i64))).ok()?;
+        let mut tail = vec![0_u8; sample];
+        file.read_exact(&mut tail).ok()?;
+        tail.hash(&mut hasher);
+    }
+    Some(hasher.finish())
+}
+
+fn changed_workspace_files(
+    workspace: &Path,
+    before: BTreeMap<String, WorkspaceFileSnapshot>,
+) -> Vec<WorkspaceWriteOutput> {
+    let after = snapshot_workspace_files(workspace);
+    after
+        .into_iter()
+        .filter_map(|(rel, snapshot)| {
+            if before.get(&rel) == Some(&snapshot) {
+                return None;
+            }
+            Some(WorkspaceWriteOutput {
+                path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
+                bytes: snapshot.len as usize,
+            })
+        })
+        .take(MAX_SHELL_GENERATED_FILES)
+        .collect()
 }
 
 async fn await_shell_output(mut handle: JoinHandle<String>, label: &str) -> Result<String, String> {
@@ -876,40 +969,55 @@ fn apply_sanitized_shell_env(command: &mut Command, project_path: &str, workspac
     // Keep generated artifacts in `LLM_WIKI_AGENT_WORKSPACE`, but do not imply
     // stronger process isolation here without adding a real sandbox layer.
     command.env_clear();
-    if let Some(path) = std::env::var_os("PATH") {
-        command.env("PATH", path);
-    }
-    if let Some(lang) = std::env::var_os("LANG") {
-        command.env("LANG", lang);
-    }
+    preserve_shell_env(command, &["PATH", "LANG", "LC_ALL", "LC_CTYPE"]);
     #[cfg(not(windows))]
     {
-        for key in ["HOME", "USER", "LOGNAME", "SHELL"] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
+        preserve_shell_env(
+            command,
+            &[
+                "HOME",
+                "USER",
+                "LOGNAME",
+                "SHELL",
+                "TMPDIR",
+                "XDG_CONFIG_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_DATA_HOME",
+            ],
+        );
     }
     #[cfg(windows)]
     {
-        for key in [
-            "ComSpec",
-            "SystemRoot",
-            "WINDIR",
-            "PATHEXT",
-            "USERPROFILE",
-            "USERNAME",
-            "HOMEDRIVE",
-            "HOMEPATH",
-        ] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
+        preserve_shell_env(
+            command,
+            &[
+                "ComSpec",
+                "SystemRoot",
+                "WINDIR",
+                "PATHEXT",
+                "USERPROFILE",
+                "USERNAME",
+                "HOMEDRIVE",
+                "HOMEPATH",
+                "TEMP",
+                "TMP",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "ProgramData",
+            ],
+        );
     }
     command.env("LLM_WIKI_PROJECT", project_path);
     command.env("LLM_WIKI_PROJECT_PATH", project_path);
     command.env("LLM_WIKI_AGENT_WORKSPACE", workspace);
+}
+
+fn preserve_shell_env(command: &mut Command, keys: &[&str]) {
+    for key in keys {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
 }
 
 async fn read_limited_output<R>(mut reader: R, max_chars: usize) -> String
@@ -2069,6 +2177,12 @@ fn validate_portable_path_segment(segment: &str) -> Result<(), String> {
     if segment.is_empty() {
         return Err("wiki.write_page path contains an empty segment".to_string());
     }
+    if segment.ends_with([' ', '.']) {
+        return Err(
+            "wiki.write_page path contains a segment ending with a space or dot, which is not portable to Windows"
+                .to_string(),
+        );
+    }
     if segment
         .chars()
         .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') || ch <= '\u{1f}')
@@ -2361,6 +2475,74 @@ mod tests {
             .stdout
             .replace('\\', "/")
             .contains(&workspace.to_string_lossy().replace('\\', "/")));
+        assert!(output
+            .generated_files
+            .iter()
+            .any(|file| file.path == "agent-workspace/generated.txt"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn shell_exec_reports_changed_workspace_files() {
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-shell-generated-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        let command = "mkdir images && echo image>images\\cover.png";
+        #[cfg(not(windows))]
+        let command = "mkdir -p images && printf image > images/cover.png";
+
+        let output = run_shell_exec(root.to_str().unwrap(), command, 5)
+            .await
+            .unwrap();
+
+        assert!(output
+            .generated_files
+            .iter()
+            .any(|file| { file.path == "agent-workspace/images/cover.png" && file.bytes > 0 }));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shell_exec_rejects_symlinked_agent_workspace_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-shell-workspace-link-{}", Uuid::new_v4()));
+        let outside = std::env::temp_dir().join(format!(
+            "llm-wiki-shell-workspace-outside-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join(AGENT_WORKSPACE_DIR)).unwrap();
+
+        let err = run_shell_exec(root.to_str().unwrap(), "pwd", 5)
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("escapes project directory"));
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn changed_workspace_files_detects_same_size_rewrites() {
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-shell-same-size-{}", Uuid::new_v4()));
+        let workspace = root.join(AGENT_WORKSPACE_DIR);
+        fs::create_dir_all(&workspace).unwrap();
+        let file = workspace.join("artifact.html");
+        fs::write(&file, "before").unwrap();
+
+        let before = snapshot_workspace_files(&workspace);
+        fs::write(&file, "after!").unwrap();
+        let changed = changed_workspace_files(&workspace, before);
+
+        assert!(changed
+            .iter()
+            .any(|file| file.path == "agent-workspace/artifact.html"));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -2381,6 +2563,8 @@ mod tests {
         assert!(write_workspace_file(root.to_str().unwrap(), "../escape.txt", "x").is_err());
         assert!(write_workspace_file(root.to_str().unwrap(), "wiki/page.md", "x").is_err());
         assert!(write_workspace_file(root.to_str().unwrap(), ".hidden/file.txt", "x").is_err());
+        assert!(write_workspace_file(root.to_str().unwrap(), "cover./file.txt", "x").is_err());
+        assert!(write_workspace_file(root.to_str().unwrap(), "cover /file.txt", "x").is_err());
         assert!(write_workspace_file(
             root.to_str().unwrap(),
             "large.txt",
@@ -2514,6 +2698,20 @@ mod tests {
             write_wiki_page_with_options(root.to_str().unwrap(), "wiki/a?b.md", "# A", false)
                 .is_err()
         );
+        assert!(write_wiki_page_with_options(
+            root.to_str().unwrap(),
+            "wiki/topic./a.md",
+            "# A",
+            false
+        )
+        .is_err());
+        assert!(write_wiki_page_with_options(
+            root.to_str().unwrap(),
+            "wiki/topic /a.md",
+            "# A",
+            false
+        )
+        .is_err());
         assert!(write_wiki_page_with_options(
             root.to_str().unwrap(),
             "wiki/queries/huge.md",

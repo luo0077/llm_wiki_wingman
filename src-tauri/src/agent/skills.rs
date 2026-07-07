@@ -99,9 +99,23 @@ fn skill_roots(project_path: &str) -> Vec<SkillRoot> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE")
+            .or_else(|| {
+                let drive = std::env::var_os("HOMEDRIVE")?;
+                let path = std::env::var_os("HOMEPATH")?;
+                let mut home = PathBuf::from(drive);
+                home.push(path);
+                Some(home.into_os_string())
+            })
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
 }
 
 fn load_one_skill_from_roots(roots: &[SkillRoot], name: &str) -> Option<AgentSkill> {
@@ -164,7 +178,11 @@ fn discover_skill_candidates_inner(dir: &Path, depth: usize, out: &mut Vec<Skill
             continue;
         }
         if meta.is_file() {
-            if path.file_name().and_then(|s| s.to_str()) == Some("SKILL.md") {
+            if path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+            {
                 if let Some(id) = path
                     .parent()
                     .and_then(|parent| parent.file_name())
@@ -175,7 +193,11 @@ fn discover_skill_candidates_inner(dir: &Path, depth: usize, out: &mut Vec<Skill
                 }
                 continue;
             }
-            if path.extension().and_then(|s| s.to_str()) == Some("md") {
+            if path
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            {
                 if let Some(id) = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -254,13 +276,26 @@ fn load_skill_directory(dir: &Path, fallback_name: &str) -> Result<AgentSkill, S
     if meta.file_type().is_symlink() || !meta.is_dir() {
         return Err("Skill folder is not readable".to_string());
     }
-    let main_path = dir.join("SKILL.md");
+    let main_path = find_skill_main_file(dir).unwrap_or_else(|| dir.join("SKILL.md"));
     let skill = load_skill_file(&main_path, fallback_name)?;
     // Only SKILL.md is injected into the Agent prompt. Supporting Markdown
     // files stay on disk and should be read lazily after the Agent has chosen
     // to use this skill; this keeps automatic skill availability cheap and
     // avoids flooding ordinary chat turns with unused reference material.
     Ok(skill)
+}
+
+fn find_skill_main_file(dir: &Path) -> Option<PathBuf> {
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+        })
+        .map(|entry| entry.path())
 }
 
 fn normalize_skill_name(value: &str) -> Option<String> {
@@ -296,6 +331,9 @@ fn split_frontmatter(raw: &str) -> (Option<String>, String) {
 }
 
 fn is_portable_skill_name(value: &str) -> bool {
+    if value.ends_with([' ', '.']) {
+        return false;
+    }
     if value
         .chars()
         .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') || ch <= '\u{1f}')
@@ -412,7 +450,15 @@ mod tests {
 
     #[test]
     fn load_project_skills_rejects_windows_reserved_names() {
-        let skills = load_project_skills("/tmp/missing", &["con".to_string(), "a:b".to_string()]);
+        let skills = load_project_skills(
+            "/tmp/missing",
+            &[
+                "con".to_string(),
+                "a:b".to_string(),
+                "topic.".to_string(),
+                "topic ".to_string(),
+            ],
+        );
         assert!(skills.is_empty());
     }
 
@@ -491,6 +537,36 @@ mod tests {
         )));
         let loaded = load_project_skills(root.to_str().unwrap(), &["illustrator".to_string()]);
         assert_eq!(loaded[0].name, "illustrator");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn list_available_skills_accepts_case_insensitive_markdown_names() {
+        let root = std::env::temp_dir().join(format!("llm-wiki-skills-{}", Uuid::new_v4()));
+        let skills_dir = root.join(".llm-wiki").join("skills");
+        fs::create_dir_all(skills_dir.join("designer")).unwrap();
+        fs::write(
+            skills_dir.join("Reviewer.MD"),
+            "---\nname: reviewer\ndescription: Review source quality\n---\nCheck claims.",
+        )
+        .unwrap();
+        fs::write(
+            skills_dir.join("designer").join("SKILL.MD"),
+            "---\nname: designer\ndescription: Design assets\n---\nCreate image prompts.",
+        )
+        .unwrap();
+
+        let skills = list_available_skills(root.to_str().unwrap());
+        let ids = skills
+            .into_iter()
+            .map(|skill| skill.id)
+            .collect::<BTreeSet<_>>();
+
+        assert!(ids.contains("Reviewer"));
+        assert!(ids.contains("designer"));
+        let loaded = load_project_skills(root.to_str().unwrap(), &["designer".to_string()]);
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].location.ends_with("/designer/SKILL.MD"));
         let _ = fs::remove_dir_all(root);
     }
 

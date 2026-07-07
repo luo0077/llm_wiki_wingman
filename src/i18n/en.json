@@ -321,8 +321,10 @@
         "enableAll": "Enable all",
         "disableAll": "Disable all",
         "refresh": "Rescan",
+        "searchPlaceholder": "Search skills by name, id, description, or source...",
         "scanDone": "Found {{count}} skills.",
         "empty": "No skills found. Add SKILL.md files to a scanned folder, then rescan.",
+        "noSearchResults": "No skills match this search.",
         "enabled": "Enabled",
         "disabled": "Disabled"
       },

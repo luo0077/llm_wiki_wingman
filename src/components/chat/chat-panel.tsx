@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { invoke } from "@tauri-apps/api/core"
+import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { BookOpen, Plus, Trash2, MessageSquare, X, Maximize2, FolderOpen, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,7 @@ import { isReasoningOnlyResponseError, streamChat } from "@/lib/llm-client"
 import { supportsImageInput } from "@/lib/llm-providers"
 import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile, readFile } from "@/commands/fs"
-import { getFileName, normalizePath } from "@/lib/path-utils"
+import { getFileName, isAbsolutePath, normalizePath } from "@/lib/path-utils"
 import { hasConfiguredAnyTxt } from "@/lib/anytxt-search"
 import type { ChatAgentEvent, ChatAgentStep, ChatUserInputRequest } from "@/lib/chat-agent-types"
 import type { ChatMessage as LlmChatMessage, ContentBlock } from "@/lib/llm-client"
@@ -20,7 +20,7 @@ import { FilePreview } from "@/components/editor/file-preview"
 import { WikiReader } from "@/components/editor/wiki-reader"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { parseFrontmatter } from "@/lib/frontmatter"
-import { getFileCategory, isTextReadable } from "@/lib/file-types"
+import { getFileCategory, getFileExtension, isTextReadable } from "@/lib/file-types"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 
 type InternalChatSendOptions = ChatSendOptions & {
@@ -212,8 +212,17 @@ function projectAbsolutePath(projectPath: string, path: string): string {
   const pp = normalizePath(projectPath)
   const normalized = normalizePath(path)
   if (normalized.startsWith(`${pp}/`)) return normalized
-  if (normalized.startsWith("/")) return normalized
+  if (isAbsolutePath(normalized)) return normalized
   return `${pp}/${normalized.replace(/^\/+/, "")}`
+}
+
+function isAgentWorkspacePath(filePath: string): boolean {
+  return normalizePath(filePath).split("/").includes("agent-workspace")
+}
+
+function isGeneratedOutputImage(filePath: string): boolean {
+  const category = getFileCategory(filePath)
+  return category === "image" || (getFileExtension(filePath) === "svg" && isAgentWorkspacePath(filePath))
 }
 
 function backendToolToAgentStep(event: BackendAgentToolEvent, index: number) {
@@ -384,6 +393,7 @@ export function ChatPanel() {
   const activeRunSessionIdRef = useRef<string | null>(null)
   const activeRunIdRef = useRef<string | null>(null)
   const runIdRef = useRef(0)
+  const dismissedGeneratedOutputsKeyRef = useRef<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [agentEvents, setAgentEvents] = useState<ChatAgentEvent[]>([])
@@ -447,7 +457,12 @@ export function ChatPanel() {
   const activeStreaming = Boolean(isStreaming && activeConversationId && streamingConversationId === activeConversationId)
   const activeAgentEvents = activeStreaming ? agentEvents : []
   const lastMessage = activeMessages[activeMessages.length - 1]
-  const lastAssistantMessage = [...activeMessages].reverse().find((message) => message.role === "assistant")
+  const latestGeneratedOutputMessage = [...activeMessages]
+    .reverse()
+    .find((message) =>
+      message.role === "assistant"
+      && (message.references ?? []).some((ref) => ref.kind === "workspace")
+    )
   const scrollKey = [
     activeConversationId ?? "",
     activeMessages.length,
@@ -468,11 +483,12 @@ export function ChatPanel() {
     setReferencePreview(null)
     setGeneratedOutputPreviews([])
     setGeneratedOutputPreview(null)
+    dismissedGeneratedOutputsKeyRef.current = null
   }, [activeConversationId])
 
   useEffect(() => {
-    if (!project || activeStreaming || !lastAssistantMessage) return
-    const outputs = (lastAssistantMessage.references ?? []).filter((ref) => ref.kind === "workspace")
+    if (!project || activeStreaming || !latestGeneratedOutputMessage) return
+    const outputs = (latestGeneratedOutputMessage.references ?? []).filter((ref) => ref.kind === "workspace")
     if (outputs.length === 0) return
     const previews = outputs.map((ref) => {
       const outputPath = projectAbsolutePath(project.path, ref.path)
@@ -486,10 +502,12 @@ export function ChatPanel() {
     })
     const currentKey = generatedOutputPreviews.map((preview) => preview.path).join("\n")
     const nextKey = previews.map((preview) => preview.path).join("\n")
+    const scopedNextKey = `${activeConversationId ?? ""}:${nextKey}`
+    if (dismissedGeneratedOutputsKeyRef.current === scopedNextKey) return
     if (currentKey === nextKey) return
     setReferencePreview(null)
     setGeneratedOutputPreviews(previews)
-  }, [activeStreaming, generatedOutputPreviews, lastAssistantMessage, project])
+  }, [activeConversationId, activeStreaming, generatedOutputPreviews, latestGeneratedOutputMessage, project])
 
   const loadGeneratedOutputPreview = useCallback(async (preview: ChatReferencePreview): Promise<ChatReferencePreview> => {
     const category = getFileCategory(preview.path)
@@ -508,6 +526,13 @@ export function ChatPanel() {
   const openGeneratedOutputModal = useCallback((preview: ChatReferencePreview) => {
     void loadGeneratedOutputPreview(preview).then(setGeneratedOutputPreview)
   }, [loadGeneratedOutputPreview])
+
+  const closeGeneratedOutputsPanel = useCallback(() => {
+    const currentKey = generatedOutputPreviews.map((preview) => preview.path).join("\n")
+    dismissedGeneratedOutputsKeyRef.current = `${activeConversationId ?? ""}:${currentKey}`
+    setGeneratedOutputPreviews([])
+    setGeneratedOutputPreview(null)
+  }, [activeConversationId, generatedOutputPreviews])
 
   const handleOpenReferencePreview = useCallback((preview: ChatReferencePreview, relatedPreviews?: ChatReferencePreview[]) => {
     const isGeneratedOutput = preview.source === "Workspace"
@@ -676,6 +701,22 @@ export function ChatPanel() {
               if (!seenRefs.has(key)) {
                 seenRefs.add(key)
                 references.push(ref)
+              }
+              if (ref.kind === "workspace" && project) {
+                const outputPath = projectAbsolutePath(project.path, ref.path)
+                const preview: ChatReferencePreview = {
+                  title: ref.title || getFileName(outputPath),
+                  path: outputPath,
+                  source: ref.source ?? "Workspace",
+                  content: "",
+                  snippet: ref.snippet,
+                }
+                dismissedGeneratedOutputsKeyRef.current = null
+                setReferencePreview(null)
+                setGeneratedOutputPreviews((prev) => {
+                  if (prev.some((item) => item.path === preview.path)) return prev
+                  return [...prev, preview]
+                })
               }
               return
             }
@@ -1210,10 +1251,7 @@ export function ChatPanel() {
         <GeneratedOutputsPanel
           outputs={generatedOutputPreviews}
           onOpen={openGeneratedOutputModal}
-          onClose={() => {
-            setGeneratedOutputPreviews([])
-            setGeneratedOutputPreview(null)
-          }}
+          onClose={closeGeneratedOutputsPanel}
         />
       )}
       {generatedOutputPreview && (
@@ -1260,6 +1298,8 @@ function GeneratedOutputsPanel({
         <div className="space-y-1">
           {outputs.map((output) => {
             const title = output.title || getFileName(output.path)
+            const isImageOutput = isGeneratedOutputImage(output.path)
+            const imageSrc = isImageOutput ? convertFileSrc(output.path) : null
             return (
               <button
                 key={output.path}
@@ -1268,7 +1308,21 @@ function GeneratedOutputsPanel({
                 className="group flex w-full items-start gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                 title={output.path}
               >
-                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+                {imageSrc ? (
+                  <span className="h-10 w-12 shrink-0 overflow-hidden rounded border border-primary/20 bg-background/80">
+                    <img
+                      src={imageSrc}
+                      alt={title}
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                      onError={(event) => {
+                        event.currentTarget.style.opacity = "0"
+                      }}
+                    />
+                  </span>
+                ) : (
+                  <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-foreground">{title}</span>
                   <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{output.path}</span>

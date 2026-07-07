@@ -70,6 +70,16 @@ describe("chat slash skill helpers", () => {
     ])
   })
 
+  it("returns every matching skill by default", () => {
+    const manySkills = Array.from({ length: 12 }, (_, index) => ({
+      id: `skill-${index}`,
+      name: `Skill ${index}`,
+      source: "project",
+    }))
+
+    expect(filterSlashSkillOptions(manySkills, "", (source) => source)).toHaveLength(12)
+  })
+
   it("maps boundary deletion to whole skill chips without hijacking forward-delete text editing", () => {
     expect(skillChipDeleteTarget("Backspace", "hello", 0, 0, 2)).toBe("last")
     expect(skillChipDeleteTarget("Delete", "", 0, 0, 2)).toBe("first")
