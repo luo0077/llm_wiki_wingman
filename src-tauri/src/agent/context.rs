@@ -93,6 +93,7 @@ fn build_system_context(
     ));
     out.push_str("- Do not create generated files in the user's home folder, Desktop, Downloads, system temp folders, hidden app metadata folders, or skill installation folders.\n");
     out.push_str("- Treat skill folders as read-only instruction/reference sources. If a skill or script needs output files, pass or choose a path under the Agent workspace above.\n");
+    out.push_str("- If the requested visual can be represented as a Mermaid diagram, reply with a ```mermaid fenced code block directly instead of generating an HTML file just to display that diagram.\n");
     out.push_str("- When using shell.exec, prefer relative output paths because the shell runs from the Agent workspace; use the LLM_WIKI_AGENT_WORKSPACE environment variable when an absolute output path is required.\n");
 
     if let Some(overview) = project.overview.as_deref().filter(|v| !v.trim().is_empty()) {

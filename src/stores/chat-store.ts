@@ -93,7 +93,7 @@ let messageCounter = 0
 
 function nextId(): string {
   messageCounter += 1
-  return String(messageCounter)
+  return `msg_${Date.now()}_${messageCounter}_${Math.random().toString(36).slice(2, 8)}`
 }
 
 function generateConversationId(): string {
@@ -329,7 +329,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (lastAssistantIdx === -1) return state
       const msgToRemove = activeMessages[activeMessages.length - 1 - lastAssistantIdx]
       return {
-        messages: state.messages.filter((m) => m.id !== msgToRemove.id),
+        messages: state.messages.filter((m) => m.conversationId !== activeId || m.id !== msgToRemove.id),
       }
     }),
 

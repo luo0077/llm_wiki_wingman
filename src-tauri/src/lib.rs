@@ -635,6 +635,7 @@ pub fn run() {
             commands::project::create_project,
             commands::project::open_project,
             commands::project::open_project_folder,
+            commands::project::open_path_in_project,
             commands::search::search_project,
             commands::search::embedding_fetch,
             commands::external_search::web_search,
