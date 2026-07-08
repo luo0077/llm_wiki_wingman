@@ -53,7 +53,7 @@
 
 LLM Wiki는 문서를 자동으로 정리되고 서로 연결된 지식 베이스로 바꾸는 크로스 플랫폼 데스크톱 애플리케이션입니다. 전통적인 RAG처럼 매번 처음부터 검색하고 답을 만드는 대신, LLM이 소스에서 **영속적인 Wiki를 증분 방식으로 구축하고 유지**합니다. 지식은 한 번 컴파일되고 계속 최신 상태로 유지되며, 쿼리마다 다시 추론되지 않습니다.
 
-이 프로젝트는 [Karpathy의 LLM Wiki 패턴](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)을 기반으로 합니다. 이는 LLM으로 개인 지식 베이스를 구축하는 방법론입니다. 우리는 핵심 아이디어를 완전한 데스크톱 애플리케이션으로 구현하고 큰 폭으로 확장했습니다.
+이 프로젝트는 [Karpathy의 LLM Wiki 패턴](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)을 기반으로 합니다. 이는 LLM으로 개인 지식 베이스를 구축하는 방법론입니다. llm_wiki는 [nash_su](https://x.com/nash_su)가 만들고 유지 관리하며, 핵심 아이디어를 완전한 데스크톱 애플리케이션으로 구현하고 큰 폭으로 확장했습니다.
 
 <p align="center">
   <img src="assets/llm_wiki_arch.jpg" width="100%" alt="LLM Wiki 아키텍처">

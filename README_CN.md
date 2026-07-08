@@ -53,7 +53,7 @@
 
 LLM Wiki 是一个跨平台桌面应用，能将你的文档自动转化为有组织、相互关联的知识库。与传统 RAG（每次查询都从头检索和回答）不同，LLM 会从你的资料中**增量构建并维护一个持久化的 Wiki**。知识只编译一次并持续更新，而非每次查询都重新推导。
 
-本项目基于 [Karpathy 的 LLM Wiki 方法论](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) —— 一套使用 LLM 构建个人知识库的方法论。我们将其核心理念实现为一个完整的桌面应用，并做了大量增强。
+本项目基于 [Karpathy 的 LLM Wiki 方法论](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) —— 一套使用 LLM 构建个人知识库的方法论。llm_wiki 由 [nash_su](https://x.com/nash_su) 创建和维护，并在保留核心理念的基础上，将其实现为完整桌面应用，加入了大量增强。
 
 <p align="center">
   <img src="assets/llm_wiki_arch.jpg" width="100%" alt="LLM Wiki 架构图">

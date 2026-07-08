@@ -53,7 +53,7 @@
 
 LLM Wiki is a cross-platform desktop application that turns your documents into an organized, interlinked knowledge base — automatically. Instead of traditional RAG (retrieve-and-answer from scratch every time), the LLM **incrementally builds and maintains a persistent wiki** from your sources. Knowledge is compiled once and kept current, not re-derived on every query.
 
-This project is based on [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — a methodology for building personal knowledge bases using LLMs. We implemented the core ideas as a full desktop application with significant enhancements.
+This project is based on [Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — a methodology for building personal knowledge bases using LLMs. llm_wiki is created and maintained by [nash_su](https://x.com/nash_su), who implemented the core ideas as a full desktop application with significant enhancements.
 
 <p align="center">
   <img src="assets/llm_wiki_arch.jpg" width="100%" alt="LLM Wiki Architecture">
