@@ -26,6 +26,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.6.1",
+    date: "2026-07-10",
+    highlights: {
+      en: [
+        "Improved Agent context so selected files, Skills, project knowledge, and retrieval evidence remain available throughout a turn.",
+        "Expanded Hybrid Search with adaptive keyword, vector, and knowledge-graph retrieval, including graph-aware references and an interactive local graph preview.",
+        "Added Agent file activity with per-file change summaries, diffs, and guarded undo when the file has not changed again.",
+        "Improved generated output handling with consolidated output browsing, automatic previews, enlarged viewing, and support for common document, image, and web formats.",
+        "Added file history comparison and restore controls for recorded project file versions.",
+        "Improved Agent loop convergence by limiting duplicate retrieval, budgeting tool iterations, and producing a final answer before the retrieval budget is exhausted.",
+      ],
+      zh: [
+        "增强 Agent 上下文能力，选中的文件、Skill、项目知识和检索证据可在整轮执行中持续使用。",
+        "扩展 Hybrid Search：自适应融合关键词、向量与知识图谱召回，并新增图谱引用和可交互的局部知识图谱预览。",
+        "新增 Agent 文件修改记录，支持按文件查看变更摘要、Diff，以及在文件未被再次修改时安全撤销。",
+        "完善生成物体验：支持集中浏览、自动预览、放大查看，以及常见文档、图片和网页格式预览。",
+        "新增文件历史比较和恢复功能，可查看并恢复已记录的项目文件版本。",
+        "优化 Agent 工具循环：限制重复检索、控制工具调用预算，并在检索预算耗尽前主动生成最终回答。",
+      ],
+    },
+  },
+  {
     version: "0.6.0",
     date: "2026-07-08",
     highlights: {
