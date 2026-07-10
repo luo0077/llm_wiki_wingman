@@ -35,6 +35,7 @@ import type { ChatAgentEvent, ChatAgentEventStage, ChatAgentStep, ChatUserInputF
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { getFileCategory, getFileExtension, isTextReadable } from "@/lib/file-types"
+import { AgentFileActivity } from "@/components/chat/agent-file-activity"
 
 // Module-level cache of source file names
 let cachedSourceFiles: string[] = []
@@ -138,6 +139,9 @@ function ChatMessageImpl({
             canApproveShellCommand={Boolean(isLastAssistant && onApproveShellCommand)}
             onApproveShellCommand={(command) => onApproveShellCommand?.(command, message.id)}
           />
+        )}
+        {isAssistant && message.agentFileChanges && message.agentFileChanges.length > 0 && (
+          <AgentFileActivity changes={message.agentFileChanges} />
         )}
         {(!isUser || message.content) && (
           <div

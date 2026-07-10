@@ -1736,7 +1736,7 @@ fn handle_chat(app: &AppHandle, project_id: &str, body: &str) -> ApiResponse {
     app.state::<agent::cancel::AgentCancellationRegistry>()
         .finish(&project.id, &session_id, &run_id);
     match result {
-        Ok(response) => {
+        Ok(mut response) => {
             if persist_session {
                 app.state::<agent::session::AgentSessionStore>()
                     .append_turn(
@@ -1746,6 +1746,9 @@ fn handle_chat(app: &AppHandle, project_id: &str, body: &str) -> ApiResponse {
                         &user_message_for_session,
                         &response.message,
                     );
+            }
+            for event in &mut response.events {
+                event.redact_for_external_api();
             }
             ok(json!({
                 "ok": true,

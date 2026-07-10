@@ -268,6 +268,31 @@ describe("chat persistence — round-trip (new format)", () => {
     expect(loaded.messages[0].images).toBeUndefined()
   })
 
+  it("does not persist Agent rollback snapshots", async () => {
+    const convs = [makeConv("c1", "Agent activity")]
+    const msg: DisplayMessage = {
+      ...makeMsg("m1", "c1", "done"),
+      agentFileChanges: [{
+        id: "run:file",
+        path: `${tmp.path}/agent-workspace/file.md`,
+        tool: "workspace.write_file",
+        operation: "modified",
+        additions: 1,
+        deletions: 1,
+        diff: "-before\n+after",
+        timestamp: 1,
+        beforeContent: "before",
+        afterContent: "after",
+      }],
+    }
+
+    await saveChatHistory(tmp.path, convs, [msg])
+    const raw = await readFileRaw(`${tmp.path}/.llm-wiki/chats/c1.json`)
+    expect(raw).not.toContain("beforeContent")
+    expect(raw).not.toContain("afterContent")
+    expect(raw).toContain("-before\\n+after")
+  })
+
   it("caps each conversation's persisted messages at 100 (oldest dropped)", async () => {
     const convs = [makeConv("c1")]
     const msgs = Array.from({ length: 150 }, (_, i) =>

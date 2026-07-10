@@ -93,6 +93,12 @@ pub struct AgentChatRequest {
     pub history_explicit: bool,
     #[serde(default)]
     pub skills: Vec<String>,
+    // Explicit project-relative files selected by the user in the chat
+    // composer. The context loader re-validates project containment and applies
+    // strict count/character budgets; callers cannot use this as an arbitrary
+    // filesystem read channel.
+    #[serde(default)]
+    pub context_files: Vec<String>,
     #[serde(default)]
     pub skill_mode: AgentSkillMode,
     // Security boundary: these commands must come from an explicit trusted
@@ -125,6 +131,7 @@ impl Default for AgentChatRequest {
             history: Vec::new(),
             history_explicit: false,
             skills: Vec::new(),
+            context_files: Vec::new(),
             skill_mode: AgentSkillMode::default(),
             approved_shell_commands: Vec::new(),
             shell_command: None,
@@ -235,7 +242,8 @@ mod tests {
         let req: AgentChatRequest = serde_json::from_value(serde_json::json!({
             "message": "hello",
             "sessionId": "s1",
-            "topK": 7
+            "topK": 7,
+            "contextFiles": ["wiki/page.md"]
         }))
         .unwrap();
 
@@ -244,6 +252,7 @@ mod tests {
         assert!(req.run_id.is_none());
         assert_eq!(req.mode, AgentMode::Standard);
         assert_eq!(req.top_k, Some(7));
+        assert_eq!(req.context_files, vec!["wiki/page.md".to_string()]);
         assert_eq!(req.skill_mode, AgentSkillMode::Explicit);
         assert!(req.tools.wiki);
         assert!(!req.tools.web);

@@ -123,6 +123,20 @@
     "sourceCount_plural": "{{count}} sources"
   },
   "chat": {
+    "agentChanges": {
+      "title": "Agent file changes",
+      "fileCount": "{{count}} file",
+      "fileCount_other": "{{count}} files",
+      "expandDiff": "Expand file diff",
+      "collapseDiff": "Collapse file diff",
+      "undo": "Undo this Agent change",
+      "undoUnavailable": "Undo is unavailable after the app restarts",
+      "diffUnavailable": "Diff unavailable because the previous file was too large to snapshot safely.",
+      "shellSnapshotUnavailable": "This file was changed by a shell command. A safe before-write snapshot is unavailable.",
+      "undoConflict": "Undo stopped because the file changed after the Agent wrote it."
+    },
+    "contextFileHint": "Add project files to this conversation",
+    "removeContextFile": "Remove {{name}} from context",
     "placeholder": "Ask about your wiki...",
     "ingestPlaceholder": "Discuss the source or ask follow-up questions...",
     "saveToWiki": "Save to Wiki",
@@ -717,7 +731,13 @@
   },
   "preview": {
     "selectFile": "Select a file to preview",
-    "notAvailable": "Preview not available for this file type"
+    "notAvailable": "Preview not available for this file type",
+    "viewAsText": "View as text",
+    "loadingText": "Loading text...",
+    "openWithSystem": "Open with system app",
+    "showSource": "Show source",
+    "showRendered": "Show rendered preview",
+    "reload": "Reload preview"
   },
   "activity": {
     "processing": "Processing: {{title}}",

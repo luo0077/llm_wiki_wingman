@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { convertFileSrc } from "@tauri-apps/api/core"
+import { openPath } from "@tauri-apps/plugin-opener"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -12,7 +13,11 @@ import {
   Music,
   FileSpreadsheet,
   FileQuestion,
+  Code2,
+  ExternalLink,
+  RefreshCw,
 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import {
   getFileCategory,
   getCodeLanguage,
@@ -50,11 +55,14 @@ export function FilePreview({ filePath, textContent }: FilePreviewProps) {
     case "pdf":
       return <TextPreview filePath={filePath} content={textContent} label="PDF (extracted text)" />
     case "code":
+      if (extension === "mmd" || extension === "mermaid") {
+        return <StandaloneMermaidPreview filePath={filePath} content={textContent} />
+      }
       if (extension === "svg" && isAgentWorkspacePath(filePath)) {
         return <ImagePreview filePath={filePath} fileName={fileName} />
       }
       if (extension === "html" || extension === "htm") {
-        return <HtmlPreview filePath={filePath} fileName={fileName} />
+        return <HtmlPreview filePath={filePath} fileName={fileName} content={textContent} />
       }
       return <CodePreview filePath={filePath} content={textContent} />
     case "data":
@@ -71,22 +79,85 @@ export function FilePreview({ filePath, textContent }: FilePreviewProps) {
   }
 }
 
-function HtmlPreview({ filePath, fileName }: { filePath: string; fileName: string }) {
+function HtmlPreview({
+  filePath,
+  fileName,
+  content,
+}: {
+  filePath: string
+  fileName: string
+  content: string
+}) {
+  const { t } = useTranslation()
   const src = convertFileSrc(filePath)
+  const [showSource, setShowSource] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   return (
-    <div className="flex h-full flex-col p-4">
-      <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="flex h-full flex-col p-4" data-preview-kind="html">
+      <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className="min-w-0 flex-1 truncate" title={filePath}>{filePath}</span>
         <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">HTML</span>
+        <button
+          type="button"
+          onClick={() => setShowSource((current) => !current)}
+          className="rounded p-1 hover:bg-accent hover:text-foreground"
+          title={showSource ? t("preview.showRendered") : t("preview.showSource")}
+          aria-label={showSource ? t("preview.showRendered") : t("preview.showSource")}
+        >
+          <Code2 className="h-3.5 w-3.5" />
+        </button>
+        {!showSource && (
+          <button
+            type="button"
+            onClick={() => setReloadKey((current) => current + 1)}
+            className="rounded p-1 hover:bg-accent hover:text-foreground"
+            title={t("preview.reload")}
+            aria-label={t("preview.reload")}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => void openPath(filePath)}
+          className="rounded p-1 hover:bg-accent hover:text-foreground"
+          title={t("preview.openWithSystem")}
+          aria-label={t("preview.openWithSystem")}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-background">
-        <iframe
-          title={fileName}
-          src={src}
-          className="h-full w-full bg-white"
-          sandbox="allow-scripts"
-        />
+        {showSource ? (
+          <pre className="h-full overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs">
+            {content}
+          </pre>
+        ) : (
+          <iframe
+            key={reloadKey}
+            title={fileName}
+            src={src}
+            className="h-full w-full bg-white"
+            // Generated HTML is untrusted Agent output. Scripts are useful for
+            // interactive reports, but same-origin access stays disabled so the
+            // document cannot reach the parent DOM or authenticated app APIs.
+            sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+          />
+        )}
       </div>
+    </div>
+  )
+}
+
+function StandaloneMermaidPreview({ filePath, content }: { filePath: string; content: string }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-auto p-6" data-preview-kind="mermaid">
+      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate" title={filePath}>{filePath}</span>
+        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">Mermaid</span>
+      </div>
+      <MermaidDiagram code={content} />
     </div>
   )
 }
@@ -335,6 +406,10 @@ function BinaryPlaceholder({
   fileName: string
   category: FileCategory
 }) {
+  const { t } = useTranslation()
+  const [text, setText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const iconMap: Record<string, typeof FileText> = {
     document: FileSpreadsheet,
     unknown: FileQuestion,
@@ -342,6 +417,26 @@ function BinaryPlaceholder({
     video: Film,
   }
   const Icon = iconMap[category] ?? FileQuestion
+
+  if (text !== null) {
+    return <CodePreview filePath={filePath} content={text} />
+  }
+
+  const viewAsText = async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      // read_file is size-bounded on the Rust side. The explicit user action is
+      // the opt-in for long-tail text formats; decoding failures remain visible
+      // here instead of being mistaken for an empty file.
+      const { readFile } = await import("@/commands/fs")
+      setText(await readFile(filePath))
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
@@ -351,8 +446,27 @@ function BinaryPlaceholder({
         <p className="mt-1 text-xs text-muted-foreground">{filePath}</p>
       </div>
       <p className="text-sm text-muted-foreground">
-        Preview not available for this file type
+        {t("preview.notAvailable")}
       </p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => void viewAsText()}
+          disabled={loading}
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+        >
+          {loading ? t("preview.loadingText") : t("preview.viewAsText")}
+        </button>
+        <button
+          type="button"
+          onClick={() => void openPath(filePath)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-accent"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          {t("preview.openWithSystem")}
+        </button>
+      </div>
+      {loadError && <p className="max-w-lg text-xs text-destructive">{loadError}</p>}
     </div>
   )
 }

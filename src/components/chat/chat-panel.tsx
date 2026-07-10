@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from "react"
+import { useRef, useEffect, useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
@@ -14,7 +14,7 @@ import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile, openPathInProject, readFile } from "@/commands/fs"
 import { getFileName, isAbsolutePath, normalizePath } from "@/lib/path-utils"
 import { hasConfiguredAnyTxt } from "@/lib/anytxt-search"
-import type { ChatAgentEvent, ChatAgentStep, ChatUserInputRequest } from "@/lib/chat-agent-types"
+import type { ChatAgentEvent, ChatAgentFileChange, ChatAgentStep, ChatUserInputRequest } from "@/lib/chat-agent-types"
 import type { ChatMessage as LlmChatMessage, ContentBlock } from "@/lib/llm-client"
 import { FilePreview } from "@/components/editor/file-preview"
 import { WikiReader } from "@/components/editor/wiki-reader"
@@ -22,6 +22,7 @@ import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { getFileCategory, getFileExtension, isTextReadable } from "@/lib/file-types"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+import { summarizeAgentFileChange } from "@/lib/agent-file-activity"
 
 type InternalChatSendOptions = ChatSendOptions & {
   suppressUserMessage?: boolean
@@ -55,6 +56,9 @@ interface BackendAgentEventPayload {
     reference?: BackendAgentReference
     request?: ChatUserInputRequest
     sessionId?: string
+    path?: string
+    existedBefore?: boolean
+    previousContent?: string
   }
 }
 
@@ -79,6 +83,16 @@ export let lastQueryPages: { title: string; path: string }[] = []
 
 const AGENT_STREAM_IDLE_TIMEOUT_MS = 8 * 60 * 1000
 const AGENT_SKILL_STREAM_IDLE_TIMEOUT_MS = 15 * 60 * 1000
+const MAX_AGENT_ACTIVITY_SNAPSHOT_CHARS = 512_000
+
+async function readAgentActivitySnapshot(path: string): Promise<string | null> {
+  try {
+    const content = await readFile(path)
+    return content.length <= MAX_AGENT_ACTIVITY_SNAPSHOT_CHARS ? content : null
+  } catch {
+    return null
+  }
+}
 
 function parentDirectory(path: string): string {
   const normalized = normalizePath(path).replace(/\/+$/g, "")
@@ -416,11 +430,13 @@ export function ChatPanel() {
   const useAnyTxtSearch = useChatStore((s) => s.useAnyTxtSearch)
   const agentMode = useChatStore((s) => s.agentMode)
   const selectedSkills = useChatStore((s) => s.selectedSkills)
+  const selectedContextFiles = useChatStore((s) => s.selectedContextFiles)
   const disabledSkills = useChatStore((s) => s.disabledSkills)
   const setUseWebSearch = useChatStore((s) => s.setUseWebSearch)
   const setUseAnyTxtSearch = useChatStore((s) => s.setUseAnyTxtSearch)
   const setAgentMode = useChatStore((s) => s.setAgentMode)
   const setSelectedSkills = useChatStore((s) => s.setSelectedSkills)
+  const setSelectedContextFiles = useChatStore((s) => s.setSelectedContextFiles)
 
   // Derive active messages via selector to re-render on message changes
   const allMessages = useChatStore((s) => s.messages)
@@ -429,10 +445,22 @@ export function ChatPanel() {
     : []
 
   const project = useWikiStore((s) => s.project)
+  const projectPathIndex = useWikiStore((s) => s.projectPathIndex)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const searchApiConfig = useWikiStore((s) => s.searchApiConfig)
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)
   const imageInputAvailable = supportsImageInput(llmConfig)
+  const availableContextFiles = useMemo(() => {
+    if (!project) return []
+    const root = normalizePath(project.path).replace(/\/+$/g, "")
+    const files = [...projectPathIndex.filesByName.values()].flat()
+    return [...new Set(files
+      .map((entry) => normalizePath(entry.path))
+      .filter((path) => path.startsWith(`${root}/`))
+      .map((path) => path.slice(root.length + 1))
+      .filter((path) => !path.split("/").some((segment) => segment.startsWith("."))))]
+      .sort((left, right) => left.localeCompare(right))
+  }, [project, projectPathIndex])
 
   const abortRef = useRef<AbortController | null>(null)
   const activeRunSessionIdRef = useRef<string | null>(null)
@@ -646,6 +674,7 @@ export function ChatPanel() {
         useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
         agentMode: useChatStore.getState().agentMode,
         skills: useChatStore.getState().selectedSkills,
+        contextFiles: useChatStore.getState().selectedContextFiles,
         skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
       }
       const allowedSkills = enabledSkillIds(
@@ -702,6 +731,10 @@ export function ChatPanel() {
           let accumulated = ""
           const references: MessageReference[] = []
           const backendEvents: BackendAgentToolEvent[] = []
+          const fileChanges = new Map<string, ChatAgentFileChange>()
+          const trackedFilePaths = new Set<string>()
+          const fileActivityTasks: Promise<void>[] = []
+          const fileActivityChains = new Map<string, Promise<void>>()
           const seenRefs = new Set<string>()
           let pendingUserInputRequest: ChatUserInputRequest | undefined
           let streamFinished = false
@@ -771,7 +804,62 @@ export function ChatPanel() {
                   if (prev.some((item) => item.path === preview.path)) return prev
                   return [...prev, preview]
                 })
+                if (!trackedFilePaths.has(outputPath) && !fileChanges.has(outputPath)) {
+                  const task = readAgentActivitySnapshot(outputPath).then((afterContent) => {
+                    if (afterContent === null) return
+                    const change = summarizeAgentFileChange({
+                      id: `${backendRunId}:${outputPath}`,
+                      path: outputPath,
+                      tool: "shell.exec",
+                      // Shell can create or replace multiple files, but it cannot
+                      // provide an atomic pre-write snapshot. Never guess that an
+                      // observed file is new because Undo could delete user data.
+                      beforeContent: "",
+                      afterContent,
+                    })
+                    change.operation = "modified"
+                    change.additions = 0
+                    change.deletions = 0
+                    change.diff = t("chat.agentChanges.shellSnapshotUnavailable")
+                    change.beforeContent = undefined
+                    change.afterContent = undefined
+                    fileChanges.set(outputPath, change)
+                  })
+                  fileActivityTasks.push(task)
+                }
               }
+              return
+            }
+            if (agentEvent.type === "fileChanged" && project && agentEvent.path && agentEvent.tool) {
+              const filePath = projectAbsolutePath(project.path, agentEvent.path)
+              trackedFilePaths.add(filePath)
+              const previousTask = fileActivityChains.get(filePath) ?? Promise.resolve()
+              const task = previousTask.then(async () => {
+                const afterContent = await readAgentActivitySnapshot(filePath)
+                if (afterContent === null) return
+                const prior = fileChanges.get(filePath)
+                const originalBefore = prior?.beforeContent
+                  ?? (agentEvent.existedBefore ? agentEvent.previousContent : null)
+                const beforeKnown = !agentEvent.existedBefore || typeof originalBefore === "string"
+                const change = summarizeAgentFileChange({
+                  id: `${backendRunId}:${filePath}`,
+                  path: filePath,
+                  tool: agentEvent.tool!,
+                  beforeContent: beforeKnown ? (originalBefore ?? null) : "",
+                  afterContent,
+                })
+                if (!beforeKnown) {
+                  change.operation = "modified"
+                  change.additions = 0
+                  change.deletions = 0
+                  change.diff = t("chat.agentChanges.diffUnavailable")
+                  change.beforeContent = undefined
+                  change.afterContent = undefined
+                }
+                fileChanges.set(filePath, change)
+              })
+              fileActivityChains.set(filePath, task)
+              fileActivityTasks.push(task)
               return
             }
             if (agentEvent.type === "userInputRequired" && agentEvent.request) {
@@ -840,6 +928,7 @@ export function ChatPanel() {
                 history: activeConvMessages,
                 historyExplicit: true,
                 skills: requestSkills,
+                contextFiles: sendOptions.contextFiles,
                 skillMode: requestedSkillMode,
                 approvedShellCommands: sendOptions.approvedShellCommands ?? [],
                 shellCommand: sendOptions.shellCommand,
@@ -850,6 +939,7 @@ export function ChatPanel() {
               },
             })
             await streamDone
+            await Promise.allSettled(fileActivityTasks)
           } finally {
             clearStreamTimeout()
             streamUnlisten?.()
@@ -860,7 +950,14 @@ export function ChatPanel() {
             .map((ref) => ({ title: ref.title, path: ref.path }))
           const steps = backendEvents.map(backendToolToAgentStep)
           finalized = true
-          finalizeStreamForConversation(convId, accumulated, references, steps, pendingUserInputRequest)
+          finalizeStreamForConversation(
+            convId,
+            accumulated,
+            references,
+            steps,
+            pendingUserInputRequest,
+            [...fileChanges.values()],
+          )
           if (!pendingUserInputRequest) {
             autoOpenSingleGeneratedOutput(convId, references)
           }
@@ -902,6 +999,7 @@ export function ChatPanel() {
             topK: sendOptions.agentMode === "deep" ? 8 : 5,
             includeContent: sendOptions.agentMode === "deep",
             skills: requestSkills,
+            contextFiles: sendOptions.contextFiles,
             skillMode: requestedSkillMode,
             historyExplicit: true,
             approvedShellCommands: sendOptions.approvedShellCommands ?? [],
@@ -1176,6 +1274,7 @@ export function ChatPanel() {
         useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
         agentMode: useChatStore.getState().agentMode,
         skills: useChatStore.getState().selectedSkills,
+        contextFiles: useChatStore.getState().selectedContextFiles,
         skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
         approvedShellCommands: [command.trim()],
         shellCommand: command.trim(),
@@ -1206,6 +1305,7 @@ export function ChatPanel() {
       useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
       agentMode: useChatStore.getState().agentMode,
       skills: useChatStore.getState().selectedSkills,
+      contextFiles: useChatStore.getState().selectedContextFiles,
       skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
     })
     return true
@@ -1298,10 +1398,13 @@ export function ChatPanel() {
           agentMode={agentMode}
           availableSkills={availableSkills}
           selectedSkills={selectedSkills}
+          availableContextFiles={availableContextFiles}
+          selectedContextFiles={selectedContextFiles}
           onUseWebSearchChange={setUseWebSearch}
           onUseAnyTxtSearchChange={setUseAnyTxtSearch}
           onAgentModeChange={setAgentMode}
           onSelectedSkillsChange={setSelectedSkills}
+          onSelectedContextFilesChange={setSelectedContextFiles}
           anyTxtAvailable={anyTxtAvailable}
           imageInputAvailable={imageInputAvailable}
           placeholder={

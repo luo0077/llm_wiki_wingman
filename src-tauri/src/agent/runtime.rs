@@ -12,8 +12,8 @@ use crate::commands::search::SearchEmbeddingConfig;
 
 use super::cancel::AgentCancellationToken;
 use super::context::{
-    build_agent_context, collapse_whitespace, intent_label, load_project_context, trim_chars,
-    AgentContextInput, BuiltAgentContext,
+    build_agent_context, collapse_whitespace, intent_label, load_explicit_context_files,
+    load_project_context, trim_chars, AgentContextInput, BuiltAgentContext,
 };
 use super::events::AgentEvent;
 use super::permissions::{AgentCapability, PermissionPolicy};
@@ -1137,6 +1137,8 @@ impl AgentRuntime {
         }
         let retrieval_summary = retrieval_parts.join("\n\n");
         let project_context = load_project_context(&self.project_path);
+        let explicit_files =
+            load_explicit_context_files(&self.project_path, &request.context_files);
         let built_context = fit_context_to_model(
             build_agent_context(AgentContextInput {
                 query: message,
@@ -1147,6 +1149,7 @@ impl AgentRuntime {
                 skill_mode: request.skill_mode,
                 references: &references,
                 retrieval_summary: &retrieval_summary,
+                explicit_files: &explicit_files,
             }),
             self.llm_config.as_ref(),
         );
@@ -1292,6 +1295,8 @@ impl AgentRuntime {
         let client = LlmClient::new(config.clone())?
             .structured_task_config(agent_structured_max_tokens(!skills.is_empty()));
         let project_context = load_project_context(&self.project_path);
+        let explicit_files =
+            load_explicit_context_files(&self.project_path, &request.context_files);
         let mut observations = Vec::<AgentObservation>::new();
         let mut last_prompt_chars = 0usize;
         let max_iterations = agent_loop_iteration_budget(request.mode, !skills.is_empty());
@@ -1348,6 +1353,7 @@ impl AgentRuntime {
                     // summary as well would duplicate large tool outputs on
                     // every iteration.
                     retrieval_summary: "",
+                    explicit_files: &explicit_files,
                 }),
                 self.llm_config.as_ref(),
             );
@@ -2122,16 +2128,25 @@ impl AgentRuntime {
                 Ok(format!("wrote {path}"))
             }
             "workspace.write_file" | "workspace.append_file" => {
-                let path = value
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .unwrap_or("agent-workspace file");
-                let bytes = value.get("bytes").and_then(Value::as_u64).unwrap_or(0);
+                let output: tools::WorkspaceWriteOutput = serde_json::from_value(value)
+                    .map_err(|err| format!("Invalid {tool} result: {err}"))?;
+                let path = output.path.as_str();
+                let bytes = output.bytes as u64;
                 let action = if tool == "workspace.append_file" {
                     "updated"
                 } else {
                     "written"
                 };
+                emit_event(
+                    events,
+                    event_sink,
+                    AgentEvent::FileChanged {
+                        path: output.path.clone(),
+                        tool: tool.to_string(),
+                        existed_before: output.existed_before,
+                        previous_content: output.previous_content,
+                    },
+                );
                 let reference = AgentReference {
                     title: Path::new(path)
                         .file_name()
@@ -4892,7 +4907,12 @@ mod tests {
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].kind, "workspace");
         assert_eq!(references[0].path, "agent-workspace/deck/index.html");
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0],
+            AgentEvent::FileChanged { path, tool, existed_before: false, previous_content: None }
+                if path == "agent-workspace/deck/index.html" && tool == "workspace.write_file"
+        ));
     }
 
     #[test]

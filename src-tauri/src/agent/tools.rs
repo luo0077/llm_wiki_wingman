@@ -30,6 +30,10 @@ use super::workspace::{agent_workspace_path, AGENT_WORKSPACE_DIR};
 const MAX_READ_PAGE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_WRITE_PAGE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_WORKSPACE_WRITE_BYTES: usize = 2 * 1024 * 1024;
+// Rollback snapshots are sent to the trusted desktop UI only for the current
+// process lifetime. Bound them independently from write size so a large Agent
+// artifact cannot multiply IPC and in-memory chat costs merely to enable Undo.
+const MAX_WORKSPACE_ROLLBACK_BYTES: u64 = 512 * 1024;
 const MAX_SOURCE_SEARCH_FILES: usize = 10_000;
 const MAX_SOURCE_SNIPPET_CHARS: usize = 500;
 const MAX_GRAPH_SEARCH_FILES: usize = 10_000;
@@ -294,6 +298,10 @@ pub struct ShellExecToolOutput {
 pub struct WorkspaceWriteOutput {
     pub path: String,
     pub bytes: usize,
+    #[serde(default)]
+    pub existed_before: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -674,10 +682,14 @@ fn write_workspace_file(
     {
         return Err("workspace.write_file refuses to overwrite a symlink".to_string());
     }
+    let existed_before = path.is_file();
+    let previous_content = workspace_rollback_snapshot(&path);
     fs::write(&path, content).map_err(|err| format!("workspace.write_file failed: {err}"))?;
     Ok(WorkspaceWriteOutput {
         path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
         bytes: content.len(),
+        existed_before,
+        previous_content,
     })
 }
 
@@ -698,6 +710,8 @@ fn append_workspace_file(
     {
         return Err("workspace.append_file refuses to overwrite a symlink".to_string());
     }
+    let existed_before = path.is_file();
+    let previous_content = workspace_rollback_snapshot(&path);
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -713,7 +727,17 @@ fn append_workspace_file(
     Ok(WorkspaceWriteOutput {
         path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
         bytes,
+        existed_before,
+        previous_content,
     })
+}
+
+fn workspace_rollback_snapshot(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_WORKSPACE_ROLLBACK_BYTES {
+        return None;
+    }
+    fs::read_to_string(path).ok()
 }
 
 fn resolve_workspace_write_target(
@@ -938,6 +962,8 @@ fn changed_workspace_files(
             Some(WorkspaceWriteOutput {
                 path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
                 bytes: snapshot.len as usize,
+                existed_before: before.contains_key(&rel),
+                previous_content: None,
             })
         })
         .take(MAX_SHELL_GENERATED_FILES)
@@ -2556,6 +2582,8 @@ mod tests {
             write_workspace_file(root.to_str().unwrap(), "cover-image/cover.svg", "<svg/>")
                 .unwrap();
         assert_eq!(written.path, "agent-workspace/cover-image/cover.svg");
+        assert!(!written.existed_before);
+        assert_eq!(written.previous_content, None);
         assert_eq!(
             fs::read_to_string(root.join("agent-workspace/cover-image/cover.svg")).unwrap(),
             "<svg/>"
@@ -2587,6 +2615,8 @@ mod tests {
 
         assert_eq!(appended.path, "agent-workspace/ppt/index.html");
         assert_eq!(appended.bytes, "<html></html>".len());
+        assert!(appended.existed_before);
+        assert_eq!(appended.previous_content.as_deref(), Some("<html>"));
         assert_eq!(
             fs::read_to_string(root.join("agent-workspace/ppt/index.html")).unwrap(),
             "<html></html>"
