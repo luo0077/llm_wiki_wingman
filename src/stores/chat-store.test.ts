@@ -142,4 +142,19 @@ describe("chat-store conversation isolation", () => {
     useChatStore.getState().setActiveConversation(second)
     expect(useChatStore.getState().selectedContextFiles).toEqual(["raw/sources/source.txt"])
   })
+
+  it("stores the context file snapshot on the user message", () => {
+    const conversationId = useChatStore.getState().createConversation()
+    useChatStore.getState().addMessageToConversation(
+      conversationId,
+      "user",
+      "summarize this",
+      [],
+      ["/project/wiki/overview.md"],
+    )
+
+    expect(useChatStore.getState().messages[0].contextFiles).toEqual([
+      "/project/wiki/overview.md",
+    ])
+  })
 })

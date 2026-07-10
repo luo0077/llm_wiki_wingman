@@ -276,7 +276,10 @@ pub fn load_explicit_context_files(
         };
         let fitted = trim_chars(&content, remaining.min(MAX_EXPLICIT_FILE_CHARS));
         remaining = remaining.saturating_sub(fitted.chars().count());
-        out.push((normalized, fitted));
+        // The request uses a project-relative path so callers cannot select an
+        // arbitrary host file. Only after canonical containment succeeds do we
+        // expose the absolute path to the model for unambiguous tool use.
+        out.push((candidate.to_string_lossy().replace('\\', "/"), fitted));
         if remaining == 0 {
             break;
         }
@@ -355,10 +358,12 @@ mod tests {
                 ".llm-wiki/secret.md".to_string(),
             ],
         );
+        assert_eq!(files.len(), 1);
         assert_eq!(
-            files,
-            vec![("wiki/page.md".to_string(), "selected evidence".to_string())]
+            Path::new(&files[0].0).canonicalize().unwrap(),
+            root.join("wiki/page.md").canonicalize().unwrap()
         );
+        assert_eq!(files[0].1, "selected evidence");
         let _ = fs::remove_dir_all(root);
     }
 

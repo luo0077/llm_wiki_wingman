@@ -44,6 +44,7 @@ export interface DisplayMessage {
   agentFileChanges?: ChatAgentFileChange[]  // concrete project files changed by this Agent turn
   userInputRequest?: ChatUserInputRequest  // dynamic schema-driven form requested by backend Agent
   images?: MessageImage[]  // images attached to a user message (vision input)
+  contextFiles?: string[]  // absolute project files explicitly attached to this user turn
 }
 
 interface ChatState {
@@ -70,7 +71,7 @@ interface ChatState {
 
   // Message management
   addMessage: (role: DisplayMessage["role"], content: string, images?: MessageImage[]) => void
-  addMessageToConversation: (conversationId: string, role: DisplayMessage["role"], content: string, images?: MessageImage[]) => void
+  addMessageToConversation: (conversationId: string, role: DisplayMessage["role"], content: string, images?: MessageImage[], contextFiles?: string[]) => void
   setMessages: (messages: DisplayMessage[]) => void
   setConversations: (conversations: Conversation[]) => void
   setStreaming: (streaming: boolean) => void
@@ -179,7 +180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().addMessageToConversation(activeConversationId, role, content, images)
   },
 
-  addMessageToConversation: (conversationId, role, content, images) =>
+  addMessageToConversation: (conversationId, role, content, images, contextFiles) =>
     set((state) => {
       const { conversations } = state
       if (!conversations.some((conversation) => conversation.id === conversationId)) return state
@@ -191,6 +192,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: Date.now(),
         conversationId,
         ...(images && images.length > 0 ? { images } : {}),
+        ...(contextFiles && contextFiles.length > 0 ? { contextFiles } : {}),
       }
 
       // Auto-set title from first user message (first 50 chars)

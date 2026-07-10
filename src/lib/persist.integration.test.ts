@@ -293,6 +293,20 @@ describe("chat persistence — round-trip (new format)", () => {
     expect(raw).toContain("-before\\n+after")
   })
 
+  it("persists user-message context file attachments", async () => {
+    const convs = [makeConv("c1", "Context files")]
+    const msg: DisplayMessage = {
+      ...makeMsg("m1", "c1", "summarize this"),
+      contextFiles: [`${tmp.path}/wiki/overview.md`],
+    }
+
+    await saveChatHistory(tmp.path, convs, [msg])
+    const loaded = await loadChatHistory(tmp.path)
+    expect(loaded.messages[0].contextFiles).toEqual([
+      `${tmp.path}/wiki/overview.md`,
+    ])
+  })
+
   it("caps each conversation's persisted messages at 100 (oldest dropped)", async () => {
     const convs = [makeConv("c1")]
     const msgs = Array.from({ length: 150 }, (_, i) =>

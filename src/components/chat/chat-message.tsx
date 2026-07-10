@@ -120,6 +120,20 @@ function ChatMessageImpl({
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
       </div>
       <div className="max-w-[80%] flex flex-col gap-1.5">
+        {isUser && message.contextFiles && message.contextFiles.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1">
+            {message.contextFiles.map((path) => (
+              <span
+                key={path}
+                className="inline-flex h-7 max-w-[18rem] items-center gap-1.5 rounded-md border border-blue-500/25 bg-blue-500/10 px-2 text-xs font-medium text-blue-700 dark:text-blue-300"
+                title={path}
+              >
+                <FileText className="h-3 w-3 shrink-0" />
+                <span className="truncate">@{getFileName(path)}</span>
+              </span>
+            ))}
+          </div>
+        )}
         {isUser && message.images && message.images.length > 0 && (
           <div className={`flex flex-wrap gap-1.5 ${isUser ? "justify-end" : ""}`}>
             {message.images.map((img, i) => (

@@ -694,7 +694,10 @@ export function ChatPanel() {
       }
 
       if (!sendOptions.suppressUserMessage) {
-        addMessageToConversation(convId, "user", text, images)
+        const messageContextFiles = project
+          ? sendOptions.contextFiles.map((path) => projectAbsolutePath(project.path, path))
+          : []
+        addMessageToConversation(convId, "user", text, images, messageContextFiles)
       }
       setStreamingConversationId(convId)
       setStreaming(true)
