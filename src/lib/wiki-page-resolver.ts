@@ -55,6 +55,24 @@ export function unwrapWikilink(s: string): { slug: string; label: string } {
   return { slug: target, label: alias && alias.length > 0 ? alias : target }
 }
 
+export type SourceReferenceResolution =
+  | { kind: "external"; url: string }
+  | { kind: "local"; path: string }
+  | { kind: "missing" }
+
+export function resolveSourceReference(
+  index: ProjectPathIndex,
+  ref: string,
+  sourcesRoot: string | null,
+): SourceReferenceResolution {
+  const trimmedRef = ref.trim()
+  if (isHttpUrl(trimmedRef)) return { kind: "external", url: trimmedRef }
+  if (!sourcesRoot) return { kind: "missing" }
+
+  const path = resolveSourceName(index, ref, sourcesRoot)
+  return path ? { kind: "local", path } : { kind: "missing" }
+}
+
 /**
  * Return the absolute path of the first indexed file whose basename
  * matches `targetName` and whose path contains `pathContains`.
@@ -159,4 +177,13 @@ export function resolveSourceName(
 function findInTreeByPath(index: ProjectPathIndex, targetPath: string): string | null {
   const found = index.byPath.get(targetPath)
   return found?.path ?? null
+}
+
+function isHttpUrl(ref: string): boolean {
+  try {
+    const url = new URL(ref)
+    return url.protocol === "http:" || url.protocol === "https:"
+  } catch {
+    return false
+  }
 }
