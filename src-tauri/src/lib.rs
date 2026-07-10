@@ -622,6 +622,8 @@ pub fn run() {
             commands::fs::write_file,
             commands::fs::write_file_base64,
             commands::fs::write_file_atomic,
+            commands::file_history::list_file_history,
+            commands::file_history::restore_file_history,
             commands::fs::list_directory,
             commands::fs::copy_file,
             commands::fs::copy_directory,

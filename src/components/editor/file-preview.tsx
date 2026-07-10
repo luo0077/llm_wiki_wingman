@@ -34,6 +34,7 @@ import { parseFrontmatter } from "@/lib/frontmatter"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { useWikiStore } from "@/stores/wiki-store"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
+import { FileHistoryButton } from "@/components/editor/file-history-panel"
 
 interface FilePreviewProps {
   filePath: string
@@ -41,6 +42,13 @@ interface FilePreviewProps {
 }
 
 export function FilePreview({ filePath, textContent }: FilePreviewProps) {
+  return <div className="relative h-full min-h-0">
+    <FilePreviewContent filePath={filePath} textContent={textContent} />
+    <FileHistoryButton filePath={filePath} currentContent={textContent} />
+  </div>
+}
+
+function FilePreviewContent({ filePath, textContent }: FilePreviewProps) {
   const category = getFileCategory(filePath)
   const fileName = getFileName(filePath)
   const extension = getFileExtension(filePath)

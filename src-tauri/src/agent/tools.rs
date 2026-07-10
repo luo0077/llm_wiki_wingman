@@ -670,7 +670,9 @@ fn write_wiki_page_with_activity(
     }
     let existed_before = path.is_file();
     let previous_content = workspace_rollback_snapshot(&path);
+    crate::commands::file_history::record_file_version(&path, "baseline", "before.wiki.write_page");
     fs::write(&path, content).map_err(|err| format!("Failed to write wiki page: {err}"))?;
+    crate::commands::file_history::record_file_version(&path, "agent", "wiki.write_page");
     Ok(WikiWriteOutput {
         reference: AgentReference {
             title: extract_markdown_title(content).unwrap_or_else(|| {
@@ -710,7 +712,13 @@ fn write_workspace_file(
     }
     let existed_before = path.is_file();
     let previous_content = workspace_rollback_snapshot(&path);
+    crate::commands::file_history::record_file_version(
+        &path,
+        "baseline",
+        "before.workspace.write_file",
+    );
     fs::write(&path, content).map_err(|err| format!("workspace.write_file failed: {err}"))?;
+    crate::commands::file_history::record_file_version(&path, "agent", "workspace.write_file");
     Ok(WorkspaceWriteOutput {
         path: format!("{AGENT_WORKSPACE_DIR}/{rel}"),
         bytes: content.len(),
@@ -738,6 +746,11 @@ fn append_workspace_file(
     }
     let existed_before = path.is_file();
     let previous_content = workspace_rollback_snapshot(&path);
+    crate::commands::file_history::record_file_version(
+        &path,
+        "baseline",
+        "before.workspace.append_file",
+    );
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -747,6 +760,7 @@ fn append_workspace_file(
             file.write_all(content.as_bytes())
         })
         .map_err(|err| format!("workspace.append_file failed: {err}"))?;
+    crate::commands::file_history::record_file_version(&path, "agent", "workspace.append_file");
     let bytes = fs::metadata(&path)
         .map(|metadata| metadata.len() as usize)
         .unwrap_or(content.len());
