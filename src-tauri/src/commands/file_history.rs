@@ -6,8 +6,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const MAX_HISTORY_CONTENT_BYTES: usize = 2 * 1024 * 1024;
-const MAX_ENTRIES_PER_FILE: usize = 50;
+const MAX_HISTORY_CONTENT_BYTES: usize = 512 * 1024;
+const MAX_ENTRIES_PER_FILE: usize = 30;
 static HISTORY_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
