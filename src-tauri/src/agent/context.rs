@@ -242,7 +242,7 @@ fn build_user_context(input: AgentContextInput<'_>) -> String {
     out
 }
 
-pub fn load_explicit_context_files(
+pub async fn load_explicit_context_files(
     project_path: &str,
     requested: &[String],
 ) -> Vec<(String, String)> {
@@ -271,10 +271,21 @@ pub fn load_explicit_context_files(
         if !candidate_canon.starts_with(&root_canon) || !candidate_canon.is_file() {
             continue;
         }
-        let Some(content) = read_trimmed(&candidate_canon, MAX_EXPLICIT_FILE_CHARS) else {
+        // Reuse the application's canonical reader so @ attachments support
+        // the same PDF, Office, image, media, and text formats as previews.
+        // read_file moves blocking parsers onto Tauri's blocking pool.
+        let Ok(content) = crate::commands::fs::read_file(
+            candidate_canon.to_string_lossy().into_owned(),
+            Some(false),
+        )
+        .await
+        else {
             continue;
         };
-        let fitted = trim_chars(&content, remaining.min(MAX_EXPLICIT_FILE_CHARS));
+        let fitted = trim_chars(content.trim(), remaining.min(MAX_EXPLICIT_FILE_CHARS));
+        if fitted.is_empty() {
+            continue;
+        }
         remaining = remaining.saturating_sub(fitted.chars().count());
         // The request uses a project-relative path so callers cannot select an
         // arbitrary host file. Only after canonical containment succeeds do we
@@ -340,30 +351,34 @@ mod tests {
     use crate::agent::router::route_query;
     use crate::agent::types::{AgentMode, AgentToolOptions};
 
-    #[test]
-    fn explicit_context_files_are_project_scoped() {
+    #[tokio::test]
+    async fn explicit_context_files_are_project_scoped() {
         let root =
             std::env::temp_dir().join(format!("llm-wiki-context-files-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("wiki")).unwrap();
         fs::create_dir_all(root.join(".llm-wiki")).unwrap();
         fs::write(root.join("wiki/page.md"), "selected evidence").unwrap();
+        fs::write(root.join("wiki/figure.png"), [0_u8, 1, 2, 3]).unwrap();
         fs::write(root.join(".llm-wiki/secret.md"), "hidden secret").unwrap();
 
         let files = load_explicit_context_files(
             root.to_str().unwrap(),
             &[
                 "wiki/page.md".to_string(),
+                "wiki/figure.png".to_string(),
                 "../outside.md".to_string(),
                 ".llm-wiki/secret.md".to_string(),
             ],
-        );
-        assert_eq!(files.len(), 1);
+        )
+        .await;
+        assert_eq!(files.len(), 2);
         assert_eq!(
             Path::new(&files[0].0).canonicalize().unwrap(),
             root.join("wiki/page.md").canonicalize().unwrap()
         );
         assert_eq!(files[0].1, "selected evidence");
+        assert!(files[1].1.starts_with("[Image: figure.png"));
         let _ = fs::remove_dir_all(root);
     }
 

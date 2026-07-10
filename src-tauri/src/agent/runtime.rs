@@ -1138,7 +1138,7 @@ impl AgentRuntime {
         let retrieval_summary = retrieval_parts.join("\n\n");
         let project_context = load_project_context(&self.project_path);
         let explicit_files =
-            load_explicit_context_files(&self.project_path, &request.context_files);
+            load_explicit_context_files(&self.project_path, &request.context_files).await;
         let built_context = fit_context_to_model(
             build_agent_context(AgentContextInput {
                 query: message,
@@ -1296,7 +1296,33 @@ impl AgentRuntime {
             .structured_task_config(agent_structured_max_tokens(!skills.is_empty()));
         let project_context = load_project_context(&self.project_path);
         let explicit_files =
-            load_explicit_context_files(&self.project_path, &request.context_files);
+            load_explicit_context_files(&self.project_path, &request.context_files).await;
+        if !request.context_files.is_empty() {
+            let detail = format!(
+                "{} of {} selected file(s) attached",
+                explicit_files.len(),
+                request.context_files.len().min(8)
+            );
+            tool_emit_event(
+                &mut tool_events,
+                &mut events,
+                &event_sink,
+                AgentToolEvent {
+                    tool: "context.attach".to_string(),
+                    status: if explicit_files.is_empty() {
+                        "failed".to_string()
+                    } else {
+                        "completed".to_string()
+                    },
+                    detail: Some(detail.clone()),
+                },
+            );
+            emit_event(
+                &mut events,
+                &event_sink,
+                AgentEvent::tool_end("context.attach", Some(detail)),
+            );
+        }
         let mut observations = Vec::<AgentObservation>::new();
         let mut last_prompt_chars = 0usize;
         let max_iterations = agent_loop_iteration_budget(request.mode, !skills.is_empty());
