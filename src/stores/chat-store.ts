@@ -31,6 +31,7 @@ export interface MessageReference {
   source?: string
   url?: string
   snippet?: string
+  graphRelations?: string[]
 }
 
 export interface DisplayMessage {

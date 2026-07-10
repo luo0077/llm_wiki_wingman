@@ -125,8 +125,12 @@
   "chat": {
     "agentChanges": {
       "title": "Agent 文件修改",
+      "taskTitle": "Agent 活动",
       "fileCount": "{{count}} 个文件",
       "fileCount_other": "{{count}} 个文件",
+      "editCount": "{{count}} 次修改",
+      "editCount_other": "{{count}} 次修改",
+      "editNumber": "第 {{number}} 次修改",
       "expandDiff": "展开文件差异",
       "collapseDiff": "收起文件差异",
       "undo": "撤销本次 Agent 修改",

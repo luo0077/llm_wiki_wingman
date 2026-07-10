@@ -27,6 +27,7 @@ export interface ChatAgentEvent {
   message?: string
   count?: number
   status?: "running" | "success" | "error" | "skipped"
+  timestamp?: number
 }
 
 export type ChatAgentMode = "fast" | "standard" | "deep" | "local_first"
@@ -75,6 +76,7 @@ export interface ChatAgentStep {
   message?: string
   count?: number
   status?: "running" | "success" | "error" | "skipped"
+  timestamp?: number
 }
 
 export interface ChatAgentFileChange {

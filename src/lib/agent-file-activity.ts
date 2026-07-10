@@ -77,3 +77,29 @@ export function mergeAgentFileChange(
     afterContent: next.afterContent,
   }
 }
+
+export interface AgentFileChangeGroup {
+  path: string
+  edits: ChatAgentFileChange[]
+  additions: number
+  deletions: number
+}
+
+/** Preserve first-seen file and edit order so the activity timeline matches
+ * execution order while aggregating per-file totals for quick review. */
+export function groupAgentFileChanges(
+  changes: readonly ChatAgentFileChange[],
+): AgentFileChangeGroup[] {
+  const byPath = new Map<string, ChatAgentFileChange[]>()
+  for (const change of changes) {
+    const edits = byPath.get(change.path) ?? []
+    edits.push(change)
+    byPath.set(change.path, edits)
+  }
+  return [...byPath.entries()].map(([path, edits]) => ({
+    path,
+    edits,
+    additions: edits.reduce((sum, edit) => sum + edit.additions, 0),
+    deletions: edits.reduce((sum, edit) => sum + edit.deletions, 0),
+  }))
+}

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { mergeAgentFileChange, summarizeAgentFileChange } from "@/lib/agent-file-activity"
+import {
+  groupAgentFileChanges,
+  mergeAgentFileChange,
+  summarizeAgentFileChange,
+} from "@/lib/agent-file-activity"
 
 describe("agent file activity", () => {
   it("summarizes a created file", () => {
@@ -50,5 +54,42 @@ describe("agent file activity", () => {
     expect(merged.id).toBe("first")
     expect(merged.beforeContent).toBe("original")
     expect(merged.afterContent).toBe("middle\nend")
+  })
+
+  it("groups repeated edits by file while preserving execution order", () => {
+    const first = summarizeAgentFileChange({
+      id: "1",
+      path: "/project/wiki/a.md",
+      tool: "wiki.write_page",
+      beforeContent: "old",
+      afterContent: "new",
+      timestamp: 1,
+    })
+    const second = summarizeAgentFileChange({
+      id: "2",
+      path: "/project/wiki/b.md",
+      tool: "workspace.write_file",
+      beforeContent: null,
+      afterContent: "b",
+      timestamp: 2,
+    })
+    const third = summarizeAgentFileChange({
+      id: "3",
+      path: "/project/wiki/a.md",
+      tool: "wiki.write_page",
+      beforeContent: "new",
+      afterContent: "newer\nline",
+      timestamp: 3,
+    })
+
+    const groups = groupAgentFileChanges([first, second, third])
+
+    expect(groups.map((group) => group.path)).toEqual([
+      "/project/wiki/a.md",
+      "/project/wiki/b.md",
+    ])
+    expect(groups[0].edits.map((edit) => edit.id)).toEqual(["1", "3"])
+    expect(groups[0].additions).toBe(first.additions + third.additions)
+    expect(groups[0].deletions).toBe(first.deletions + third.deletions)
   })
 })

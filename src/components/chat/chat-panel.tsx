@@ -35,12 +35,18 @@ interface BackendAgentReference {
   kind: string
   snippet?: string
   score?: number
+  knowledgeContext?: {
+    relatedTo?: string[]
+    outgoingLinks?: string[]
+    backlinks?: string[]
+  }
 }
 
 interface BackendAgentToolEvent {
   tool: string
   status: string
   detail?: string
+  timestamp?: number
 }
 
 interface BackendAgentEventPayload {
@@ -264,6 +270,7 @@ function backendReferenceToMessageReference(ref: BackendAgentReference): Message
     source,
     url: isWeb ? ref.path : undefined,
     snippet: ref.snippet,
+    graphRelations: ref.knowledgeContext?.relatedTo,
   }
 }
 
@@ -291,6 +298,7 @@ function backendToolToAgentStep(event: BackendAgentToolEvent, index: number) {
       type: "routing" as const,
       message: event.detail ?? event.tool,
       status: event.status === "failed" ? "error" as const : "success" as const,
+      timestamp: event.timestamp,
     }
   }
   if (event.tool === "llm.generate") {
@@ -301,6 +309,7 @@ function backendToolToAgentStep(event: BackendAgentToolEvent, index: number) {
       status: event.status === "failed" ? "error" as const
         : event.status === "started" ? "running" as const
           : "success" as const,
+      timestamp: event.timestamp,
     }
   }
   const tool = normalizeBackendToolName(event.tool)
@@ -313,6 +322,7 @@ function backendToolToAgentStep(event: BackendAgentToolEvent, index: number) {
       : event.status === "available" ? "skipped" as const
         : event.status === "started" ? "running" as const
           : "success" as const,
+    timestamp: event.timestamp,
   }
 }
 
@@ -341,6 +351,7 @@ function backendToolToAgentEvent(event: BackendAgentToolEvent): ChatAgentEvent {
       stage: "routing",
       message: event.detail ?? event.tool,
       status: event.status === "failed" ? "error" : "success",
+      timestamp: event.timestamp,
     }
   }
   if (event.tool === "llm.generate") {
@@ -350,6 +361,7 @@ function backendToolToAgentEvent(event: BackendAgentToolEvent): ChatAgentEvent {
       status: event.status === "failed" ? "error"
         : event.status === "started" ? "running"
           : "success",
+      timestamp: event.timestamp,
     }
   }
   const tool = normalizeBackendToolName(event.tool)
@@ -369,6 +381,7 @@ function backendToolToAgentEvent(event: BackendAgentToolEvent): ChatAgentEvent {
       : event.status === "started" ? "running"
         : event.status === "available" ? "skipped"
           : "success",
+    timestamp: event.timestamp,
   }
 }
 
@@ -738,6 +751,7 @@ export function ChatPanel() {
           const fileChanges = new Map<string, ChatAgentFileChange>()
           const fileEditChanges: ChatAgentFileChange[] = []
           let fileEditSequence = 0
+          const fileEditOrder = new Map<string, number>()
           const trackedFilePaths = new Set<string>()
           const fileActivityTasks: Promise<void>[] = []
           const fileActivityChains = new Map<string, Promise<void>>()
@@ -811,10 +825,14 @@ export function ChatPanel() {
                   return [...prev, preview]
                 })
                 if (!trackedFilePaths.has(outputPath) && !fileChanges.has(outputPath)) {
+                  const editSequence = ++fileEditSequence
+                  const editId = `${backendRunId}:${outputPath}:${editSequence}`
+                  const editTimestamp = Date.now()
+                  fileEditOrder.set(editId, editSequence)
                   const task = readAgentActivitySnapshot(outputPath).then((afterContent) => {
                     if (afterContent === null) return
                     const change = summarizeAgentFileChange({
-                      id: `${backendRunId}:${outputPath}:${++fileEditSequence}`,
+                      id: editId,
                       path: outputPath,
                       tool: "shell.exec",
                       // Shell can create or replace multiple files, but it cannot
@@ -822,6 +840,7 @@ export function ChatPanel() {
                       // observed file is new because Undo could delete user data.
                       beforeContent: "",
                       afterContent,
+                      timestamp: editTimestamp,
                     })
                     change.operation = "modified"
                     change.additions = 0
@@ -839,7 +858,10 @@ export function ChatPanel() {
             }
             if (agentEvent.type === "fileChanged" && project && agentEvent.path && agentEvent.tool) {
               const filePath = projectAbsolutePath(project.path, agentEvent.path)
-              const editId = `${backendRunId}:${filePath}:${++fileEditSequence}`
+              const editSequence = ++fileEditSequence
+              const editId = `${backendRunId}:${filePath}:${editSequence}`
+              const editTimestamp = Date.now()
+              fileEditOrder.set(editId, editSequence)
               trackedFilePaths.add(filePath)
               const previousTask = fileActivityChains.get(filePath) ?? Promise.resolve()
               const task = previousTask.then(async () => {
@@ -853,6 +875,7 @@ export function ChatPanel() {
                   tool: agentEvent.tool!,
                   beforeContent: beforeKnown ? (originalBefore ?? null) : "",
                   afterContent,
+                  timestamp: editTimestamp,
                 })
                 if (!beforeKnown) {
                   change.operation = "modified"
@@ -884,6 +907,7 @@ export function ChatPanel() {
                 tool: agentEvent.tool,
                 status: "started",
                 detail: agentEvent.input,
+                timestamp: Date.now(),
               }
               backendEvents.push(toolEvent)
               setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
@@ -896,6 +920,7 @@ export function ChatPanel() {
                 tool: agentEvent.tool,
                 status: failed ? "failed" : skipped ? "available" : "completed",
                 detail: agentEvent.output,
+                timestamp: Date.now(),
               }
               backendEvents.push(toolEvent)
               setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
@@ -906,6 +931,7 @@ export function ChatPanel() {
                 tool: "agent",
                 status: "failed",
                 detail: agentEvent.message,
+                timestamp: Date.now(),
               }
               backendEvents.push(toolEvent)
               setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
@@ -947,6 +973,9 @@ export function ChatPanel() {
             })
             await streamDone
             await Promise.allSettled(fileActivityTasks)
+            fileEditChanges.sort(
+              (left, right) => (fileEditOrder.get(left.id) ?? 0) - (fileEditOrder.get(right.id) ?? 0),
+            )
           } finally {
             clearStreamTimeout()
             streamUnlisten?.()

@@ -159,6 +159,35 @@ pub struct AgentReference {
     pub snippet: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_context: Option<AgentKnowledgeContext>,
+}
+
+/// Lightweight graph and provenance briefing attached to wiki retrievals.
+/// Keep this bounded: the complete page body is already available through the
+/// read/search result and duplicating an unbounded graph would waste context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentKnowledgeContext {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related_to: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outgoing_links: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backlinks: Vec<String>,
+    pub link_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<AgentVersionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentVersionSummary {
+    pub timestamp: i64,
+    pub author: String,
+    pub tool: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

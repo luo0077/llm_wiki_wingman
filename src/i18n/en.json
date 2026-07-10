@@ -125,8 +125,12 @@
   "chat": {
     "agentChanges": {
       "title": "Agent file changes",
+      "taskTitle": "Agent activity",
       "fileCount": "{{count}} file",
       "fileCount_other": "{{count}} files",
+      "editCount": "{{count}} edit",
+      "editCount_other": "{{count}} edits",
+      "editNumber": "edit {{number}}",
       "expandDiff": "Expand file diff",
       "collapseDiff": "Collapse file diff",
       "undo": "Undo this Agent change",

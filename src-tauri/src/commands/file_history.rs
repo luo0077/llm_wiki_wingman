@@ -21,6 +21,19 @@ pub struct FileHistoryEntry {
     pub content: String,
 }
 
+/// Return provenance only, never historical content, for Agent retrieval
+/// briefings. Reading the same bounded store as the timeline keeps attribution
+/// consistent without expanding prompt size or exposing rollback snapshots.
+pub fn latest_file_version(path: &Path) -> Option<(i64, String, String)> {
+    let root = project_root_for(path)?;
+    let _guard = HISTORY_LOCK.lock().ok()?;
+    let raw = fs::read_to_string(history_path(&root, path)).ok()?;
+    let entries: Vec<FileHistoryEntry> = serde_json::from_str(&raw).ok()?;
+    entries
+        .last()
+        .map(|entry| (entry.timestamp, entry.author.clone(), entry.tool.clone()))
+}
+
 fn project_root_for(path: &Path) -> Option<PathBuf> {
     let mut cursor = path.parent();
     while let Some(dir) = cursor {

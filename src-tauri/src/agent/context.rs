@@ -77,7 +77,8 @@ fn build_system_context(
     .join("\n");
 
     out.push_str("\n\nTool policy:\n");
-    out.push_str("- wiki.search can search generated wiki pages.\n");
+    out.push_str("- wiki.search retrieves pages for factual or topical questions.\n");
+    out.push_str("- graph.search retrieves relationships, neighbors, backlinks, dependencies, and connections between project entities. Prefer it when the requested answer is about how concepts or entities relate, and use concise entity names rather than the full natural-language question.\n");
     if router.should_hint_web {
         out.push_str("- web.search is available when current or external information is useful.\n");
     }
@@ -230,6 +231,33 @@ fn build_user_context(input: AgentContextInput<'_>) -> String {
             if let Some(snippet) = reference.snippet.as_deref() {
                 rendered.push_str(&format!("Snippet: {}\n", collapse_whitespace(snippet)));
             }
+            if let Some(context) = reference.knowledge_context.as_ref() {
+                if !context.related_to.is_empty() {
+                    rendered.push_str(&format!(
+                        "Graph neighbors of: {}\n",
+                        context.related_to.join(", ")
+                    ));
+                }
+                if !context.tags.is_empty() {
+                    rendered.push_str(&format!("Tags: {}\n", context.tags.join(", ")));
+                }
+                if !context.outgoing_links.is_empty() {
+                    rendered.push_str(&format!(
+                        "Links to: {}\n",
+                        context.outgoing_links.join(", ")
+                    ));
+                }
+                if !context.backlinks.is_empty() {
+                    rendered.push_str(&format!("Backlinks: {}\n", context.backlinks.join(", ")));
+                }
+                rendered.push_str(&format!("Related links: {}\n", context.link_count));
+                if let Some(version) = context.latest_version.as_ref() {
+                    rendered.push_str(&format!(
+                        "Latest version: {} via {} at {}\n",
+                        version.author, version.tool, version.timestamp
+                    ));
+                }
+            }
         }
         out.push_str(&trim_chars(&rendered, MAX_REFERENCE_CHARS));
         out.push('\n');
@@ -349,7 +377,53 @@ pub fn intent_label(intent: QueryIntent) -> &'static str {
 mod tests {
     use super::*;
     use crate::agent::router::route_query;
-    use crate::agent::types::{AgentMode, AgentToolOptions};
+    use crate::agent::types::{
+        AgentKnowledgeContext, AgentMode, AgentReference, AgentToolOptions, AgentVersionSummary,
+    };
+
+    #[test]
+    fn retrieved_context_renders_graph_and_version_briefing() {
+        let project = ProjectContext {
+            overview: None,
+            schema: None,
+            agent_workspace: "/tmp/project/agent-workspace".to_string(),
+        };
+        let router = route_query("alpha", AgentMode::Standard, &AgentToolOptions::default());
+        let references = vec![AgentReference {
+            title: "Alpha".to_string(),
+            path: "wiki/alpha.md".to_string(),
+            kind: "wiki".to_string(),
+            snippet: Some("alpha summary".to_string()),
+            score: Some(1.0),
+            knowledge_context: Some(AgentKnowledgeContext {
+                related_to: Vec::new(),
+                tags: vec!["core".to_string()],
+                outgoing_links: vec!["Beta".to_string()],
+                backlinks: vec!["wiki/gamma.md".to_string()],
+                link_count: 2,
+                latest_version: Some(AgentVersionSummary {
+                    timestamp: 123,
+                    author: "agent".to_string(),
+                    tool: "wiki.write_page".to_string(),
+                }),
+            }),
+        }];
+        let rendered = build_user_context(AgentContextInput {
+            query: "alpha",
+            project: &project,
+            router: &router,
+            history: &[],
+            skills: &[],
+            skill_mode: AgentSkillMode::Auto,
+            references: &references,
+            retrieval_summary: "",
+            explicit_files: &[],
+        });
+        assert!(rendered.contains("Tags: core"));
+        assert!(rendered.contains("Links to: Beta"));
+        assert!(rendered.contains("Backlinks: wiki/gamma.md"));
+        assert!(rendered.contains("Latest version: agent via wiki.write_page at 123"));
+    }
 
     #[tokio::test]
     async fn explicit_context_files_are_project_scoped() {
