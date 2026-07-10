@@ -915,13 +915,23 @@ async fn run_shell_exec(
         }
         stderr.push_str(&message);
     }
+    let generated_files = changed_workspace_files(&workspace, before_files);
+    for output in &generated_files {
+        if let Some(relative) = output.path.strip_prefix(&format!("{AGENT_WORKSPACE_DIR}/")) {
+            crate::commands::file_history::record_file_version(
+                &workspace.join(relative),
+                "agent",
+                "shell.exec",
+            );
+        }
+    }
     Ok(ShellExecToolOutput {
         command: command.to_string(),
         exit_code,
         stdout,
         stderr,
         timed_out,
-        generated_files: changed_workspace_files(&workspace, before_files),
+        generated_files,
     })
 }
 

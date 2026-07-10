@@ -737,7 +737,15 @@
     "openWithSystem": "Open with system app",
     "showSource": "Show source",
     "showRendered": "Show rendered preview",
-    "reload": "Reload preview"
+    "reload": "Reload preview",
+    "history": "File history",
+    "historyLoading": "Loading...",
+    "historyEmpty": "No recorded versions yet.",
+    "historySelect": "Select a version to compare.",
+    "historyRestore": "Restore this version",
+    "pdfText": "Text",
+    "pdfDocument": "PDF",
+    "pdfPage": "Page"
   },
   "activity": {
     "processing": "Processing: {{title}}",

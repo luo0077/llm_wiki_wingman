@@ -95,6 +95,7 @@ function FilePreviewContent({ filePath, textContent }: FilePreviewProps) {
 }
 
 function PdfPreview({ filePath, content }: { filePath: string; content: string }) {
+  const { t } = useTranslation()
   const [showText, setShowText] = useState(false)
   const [page, setPage] = useState(1)
   const [zoom, setZoom] = useState(100)
@@ -102,8 +103,8 @@ function PdfPreview({ filePath, content }: { filePath: string; content: string }
   return <div className="flex h-full min-h-0 flex-col p-4">
     <div className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
       <span className="min-w-0 flex-1 truncate" title={filePath}>{filePath}</span>
-      <button type="button" className="rounded border px-2 py-1 hover:bg-muted" onClick={() => setShowText((value) => !value)}>{showText ? "PDF" : "Text"}</button>
-      {!showText && <><button type="button" className="rounded p-1 hover:bg-muted" onClick={() => setZoom((value) => Math.max(50, value - 25))}><Minus className="h-3.5 w-3.5" /></button><span className="w-10 text-center">{zoom}%</span><button type="button" className="rounded p-1 hover:bg-muted" onClick={() => setZoom((value) => Math.min(300, value + 25))}><Plus className="h-3.5 w-3.5" /></button><label className="ml-1 flex items-center gap-1">Page<input value={page} min={1} type="number" onChange={(event) => setPage(Math.max(1, Number(event.target.value) || 1))} className="w-14 rounded border bg-background px-1 py-0.5" /></label></>}
+      <button type="button" className="rounded border px-2 py-1 hover:bg-muted" onClick={() => setShowText((value) => !value)}>{showText ? t("preview.pdfDocument") : t("preview.pdfText")}</button>
+      {!showText && <><button type="button" className="rounded p-1 hover:bg-muted" onClick={() => setZoom((value) => Math.max(50, value - 25))}><Minus className="h-3.5 w-3.5" /></button><span className="w-10 text-center">{zoom}%</span><button type="button" className="rounded p-1 hover:bg-muted" onClick={() => setZoom((value) => Math.min(300, value + 25))}><Plus className="h-3.5 w-3.5" /></button><label className="ml-1 flex items-center gap-1">{t("preview.pdfPage")}<input value={page} min={1} type="number" onChange={(event) => setPage(Math.max(1, Number(event.target.value) || 1))} className="w-14 rounded border bg-background px-1 py-0.5" /></label></>}
     </div>
     <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-white">
       {showText ? <TextPreview filePath={filePath} content={content} label="PDF text" /> : <object key={src} data={src} type="application/pdf" className="h-full w-full"><iframe title={filePath} src={src} className="h-full w-full" /></object>}

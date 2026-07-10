@@ -737,7 +737,15 @@
     "openWithSystem": "使用系统应用打开",
     "showSource": "查看源码",
     "showRendered": "查看渲染结果",
-    "reload": "重新加载预览"
+    "reload": "重新加载预览",
+    "history": "文件历史",
+    "historyLoading": "正在加载...",
+    "historyEmpty": "暂无已记录的版本。",
+    "historySelect": "选择一个版本进行比较。",
+    "historyRestore": "恢复此版本",
+    "pdfText": "文本",
+    "pdfDocument": "PDF",
+    "pdfPage": "页码"
   },
   "activity": {
     "processing": "处理中：{{title}}",
