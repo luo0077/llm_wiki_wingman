@@ -736,6 +736,8 @@ export function ChatPanel() {
           const references: MessageReference[] = []
           const backendEvents: BackendAgentToolEvent[] = []
           const fileChanges = new Map<string, ChatAgentFileChange>()
+          const fileEditChanges: ChatAgentFileChange[] = []
+          let fileEditSequence = 0
           const trackedFilePaths = new Set<string>()
           const fileActivityTasks: Promise<void>[] = []
           const fileActivityChains = new Map<string, Promise<void>>()
@@ -812,7 +814,7 @@ export function ChatPanel() {
                   const task = readAgentActivitySnapshot(outputPath).then((afterContent) => {
                     if (afterContent === null) return
                     const change = summarizeAgentFileChange({
-                      id: `${backendRunId}:${outputPath}`,
+                      id: `${backendRunId}:${outputPath}:${++fileEditSequence}`,
                       path: outputPath,
                       tool: "shell.exec",
                       // Shell can create or replace multiple files, but it cannot
@@ -828,6 +830,7 @@ export function ChatPanel() {
                     change.beforeContent = undefined
                     change.afterContent = undefined
                     fileChanges.set(outputPath, change)
+                    fileEditChanges.push(change)
                   })
                   fileActivityTasks.push(task)
                 }
@@ -836,17 +839,16 @@ export function ChatPanel() {
             }
             if (agentEvent.type === "fileChanged" && project && agentEvent.path && agentEvent.tool) {
               const filePath = projectAbsolutePath(project.path, agentEvent.path)
+              const editId = `${backendRunId}:${filePath}:${++fileEditSequence}`
               trackedFilePaths.add(filePath)
               const previousTask = fileActivityChains.get(filePath) ?? Promise.resolve()
               const task = previousTask.then(async () => {
                 const afterContent = await readAgentActivitySnapshot(filePath)
                 if (afterContent === null) return
-                const prior = fileChanges.get(filePath)
-                const originalBefore = prior?.beforeContent
-                  ?? (agentEvent.existedBefore ? agentEvent.previousContent : null)
+                const originalBefore = agentEvent.existedBefore ? agentEvent.previousContent : null
                 const beforeKnown = !agentEvent.existedBefore || typeof originalBefore === "string"
                 const change = summarizeAgentFileChange({
-                  id: `${backendRunId}:${filePath}`,
+                  id: editId,
                   path: filePath,
                   tool: agentEvent.tool!,
                   beforeContent: beforeKnown ? (originalBefore ?? null) : "",
@@ -861,6 +863,7 @@ export function ChatPanel() {
                   change.afterContent = undefined
                 }
                 fileChanges.set(filePath, change)
+                fileEditChanges.push(change)
               })
               fileActivityChains.set(filePath, task)
               fileActivityTasks.push(task)
@@ -960,7 +963,7 @@ export function ChatPanel() {
             references,
             steps,
             pendingUserInputRequest,
-            [...fileChanges.values()],
+            fileEditChanges,
           )
           if (!pendingUserInputRequest) {
             autoOpenSingleGeneratedOutput(convId, references)

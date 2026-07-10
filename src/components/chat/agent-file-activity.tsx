@@ -83,6 +83,7 @@ export function AgentFileActivity({ changes }: { changes: ChatAgentFileChange[] 
                 </button>
                 <span className="shrink-0 font-mono text-[10px] text-emerald-600 dark:text-emerald-400">+{change.additions}</span>
                 <span className="shrink-0 font-mono text-[10px] text-red-600 dark:text-red-400">-{change.deletions}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground">{new Date(change.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
                 <button
                   type="button"
                   disabled={!canUndo || undoing === change.id}
