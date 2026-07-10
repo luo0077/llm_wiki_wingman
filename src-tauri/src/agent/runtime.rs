@@ -394,10 +394,21 @@ impl AgentRuntime {
             )
             .await
             .and_then(|value| {
-                serde_json::from_value::<AgentReference>(value)
+                serde_json::from_value::<tools::WikiWriteOutput>(value)
                     .map_err(|err| format!("Invalid wiki.write_page result: {err}"))
             }) {
-                Ok(reference) => {
+                Ok(output) => {
+                    emit_event(
+                        &mut events,
+                        &event_sink,
+                        AgentEvent::FileChanged {
+                            path: output.reference.path.clone(),
+                            tool: "wiki.write_page".to_string(),
+                            existed_before: output.existed_before,
+                            previous_content: output.previous_content,
+                        },
+                    );
+                    let reference = output.reference;
                     emit_event(
                         &mut events,
                         &event_sink,
@@ -2147,8 +2158,19 @@ impl AgentRuntime {
                 ))
             }
             "wiki.write_page" => {
-                let reference: AgentReference = serde_json::from_value(value)
+                let output: tools::WikiWriteOutput = serde_json::from_value(value)
                     .map_err(|err| format!("Invalid wiki.write_page result: {err}"))?;
+                emit_event(
+                    events,
+                    event_sink,
+                    AgentEvent::FileChanged {
+                        path: output.reference.path.clone(),
+                        tool: "wiki.write_page".to_string(),
+                        existed_before: output.existed_before,
+                        previous_content: output.previous_content,
+                    },
+                );
+                let reference = output.reference;
                 let path = reference.path.clone();
                 push_unique_reference(references, events, event_sink, reference);
                 Ok(format!("wrote {path}"))

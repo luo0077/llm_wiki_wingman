@@ -124,7 +124,7 @@ impl ToolRegistry for BuiltinToolRegistry {
                         .or_else(|| input.get("allow_overwrite"))
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
-                    serde_json::to_value(write_wiki_page_with_options(
+                    serde_json::to_value(write_wiki_page_with_activity(
                         context.project_path,
                         path,
                         content,
@@ -298,6 +298,17 @@ pub struct ShellExecToolOutput {
 pub struct WorkspaceWriteOutput {
     pub path: String,
     pub bytes: usize,
+    #[serde(default)]
+    pub existed_before: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiWriteOutput {
+    #[serde(flatten)]
+    pub reference: AgentReference,
     #[serde(default)]
     pub existed_before: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -626,6 +637,15 @@ pub fn write_wiki_page_with_options(
     content: &str,
     allow_overwrite: bool,
 ) -> Result<AgentReference, String> {
+    Ok(write_wiki_page_with_activity(project_path, rel_path, content, allow_overwrite)?.reference)
+}
+
+fn write_wiki_page_with_activity(
+    project_path: &str,
+    rel_path: &str,
+    content: &str,
+    allow_overwrite: bool,
+) -> Result<WikiWriteOutput, String> {
     if content.len() > MAX_WRITE_PAGE_BYTES {
         return Err("wiki.write_page content is too large".to_string());
     }
@@ -648,20 +668,26 @@ pub fn write_wiki_page_with_options(
                 .to_string(),
         );
     }
+    let existed_before = path.is_file();
+    let previous_content = workspace_rollback_snapshot(&path);
     fs::write(&path, content).map_err(|err| format!("Failed to write wiki page: {err}"))?;
-    Ok(AgentReference {
-        title: extract_markdown_title(content).unwrap_or_else(|| {
-            Path::new(&rel)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Wiki page")
-                .replace('-', " ")
-        }),
-        path: rel,
-        kind: "wiki".to_string(),
-        snippet: Some(trim_text(&collapse_markdown_preview(content), 500))
-            .filter(|value| !value.trim().is_empty()),
-        score: None,
+    Ok(WikiWriteOutput {
+        reference: AgentReference {
+            title: extract_markdown_title(content).unwrap_or_else(|| {
+                Path::new(&rel)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Wiki page")
+                    .replace('-', " ")
+            }),
+            path: rel,
+            kind: "wiki".to_string(),
+            snippet: Some(trim_text(&collapse_markdown_preview(content), 500))
+                .filter(|value| !value.trim().is_empty()),
+            score: None,
+        },
+        existed_before,
+        previous_content,
     })
 }
 
@@ -2776,6 +2802,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(overwritten.title, "Replaced");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn wiki_write_activity_captures_create_and_overwrite_state() {
+        let root =
+            std::env::temp_dir().join(format!("llm-wiki-agent-write-activity-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("wiki")).unwrap();
+
+        let created = write_wiki_page_with_activity(
+            root.to_str().unwrap(),
+            "wiki/page.md",
+            "# Original",
+            false,
+        )
+        .unwrap();
+        assert!(!created.existed_before);
+        assert_eq!(created.previous_content, None);
+
+        let modified = write_wiki_page_with_activity(
+            root.to_str().unwrap(),
+            "wiki/page.md",
+            "# Updated",
+            true,
+        )
+        .unwrap();
+        assert!(modified.existed_before);
+        assert_eq!(modified.previous_content.as_deref(), Some("# Original"));
+        assert_eq!(modified.reference.path, "wiki/page.md");
         let _ = fs::remove_dir_all(root);
     }
 
