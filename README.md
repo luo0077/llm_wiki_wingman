@@ -450,7 +450,7 @@ For MCP-compatible clients, LLM Wiki also includes a local MCP server in `mcp-se
 A ready-made **agent skill** for LLM Wiki lives in its own repo. Install it into Claude Code / Codex / any skills-compatible runtime:
 
 ```bash
-npx skills add https://github.com/nashsu/llm_wiki_skill.git --skill llm_wiki_skill
+npx skills add https://github.com/nashsu/llm_wiki_skill.git --skill llm-wiki
 ```
 
 After install, the agent can answer prompts like "what does my LLM Wiki say about X", "search my 知识库 for Y", "show the neighborhood of node Z in my wiki graph", and "rescan my wiki sources" by talking to your locally-running app — read-only by default, citing wiki page paths so you can verify in-app.

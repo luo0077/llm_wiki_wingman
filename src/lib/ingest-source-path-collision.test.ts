@@ -15,6 +15,7 @@ let failLongChunksOnce = new Set<number>()
 let extraReviewResponse = ""
 let generationSuffix = ""
 let abortDuringReview: AbortController | null = null
+let interactiveGenerationOverride = ""
 
 vi.mock("./llm-client", () => ({
   streamChat: vi.fn(async (_cfg, messages, cb) => {
@@ -29,6 +30,11 @@ vi.mock("./llm-client", () => ({
     }
 
     if (systemPrompt.startsWith("You are a wiki generation assistant")) {
+      if (interactiveGenerationOverride) {
+        cb.onToken(interactiveGenerationOverride)
+        cb.onDone()
+        return
+      }
       cb.onToken([
         "---FILE: wiki/sources/config.md---",
         "---",
@@ -129,6 +135,7 @@ describe("autoIngest source summary paths", () => {
     extraReviewResponse = ""
     generationSuffix = ""
     abortDuringReview = null
+    interactiveGenerationOverride = ""
     mockStreamChat.mockClear()
     mockParseWithMineru.mockReset()
     tmp = await createTempProject("same-basename-sources")
@@ -619,5 +626,20 @@ describe("autoIngest source summary paths", () => {
     expect(writtenPaths.map((p) => p.replace(/\\/g, "/"))).toEqual([canonicalSummaryPath])
     await expect(fs.access(staleSummaryPath)).rejects.toThrow()
     expect(content).toContain('sources: ["project-a/config.yaml"]')
+  })
+
+  it("rejects unsafe and application-managed paths from interactive writes", async () => {
+    if (!tmp) throw new Error("missing temp project")
+    interactiveGenerationOverride = [
+      "---FILE: wiki/INDEX.md---\n# hostile index\n---END FILE---",
+      "---FILE: wiki\\overview.MD---\n# hostile overview\n---END FILE---",
+      "---FILE: ../escape.md---\n# escape\n---END FILE---",
+    ].join("\n")
+    useChatStore.setState({ ingestSource: `${tmp.path}/raw/sources/project-a/config.yaml` })
+
+    const written = await executeIngestWrites(tmp.path, useWikiStore.getState().llmConfig)
+
+    expect(written).toEqual([])
+    await expect(fs.access(path.join(tmp.path, "escape.md"))).rejects.toThrow()
   })
 })

@@ -28,7 +28,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use super::cli_resolver::find_cli_command;
+use super::cli_resolver::{child_path_env, find_cli_command};
 
 const ISOLATED_MCP_CONFIG: &str = "{\"mcpServers\":{}}";
 
@@ -189,6 +189,11 @@ pub async fn claude_cli_detect() -> Result<DetectResult, String> {
 
     let mut cmd = Command::new(&path);
     suppress_windows_console(&mut cmd);
+    // npm-installed Claude is a Node shim. Desktop apps do not inherit the
+    // user's login-shell PATH, so detection and execution must both supply it.
+    if let Some(path_env) = child_path_env().await {
+        cmd.env("PATH", path_env);
+    }
     let output = tokio::time::timeout(Duration::from_secs(3), cmd.arg("--version").output()).await;
 
     match output {
@@ -292,6 +297,9 @@ pub async fn claude_cli_spawn(
     let claude = find_claude_command().await?;
     let mut cmd = Command::new(&claude);
     suppress_windows_console(&mut cmd);
+    if let Some(path_env) = child_path_env().await {
+        cmd.env("PATH", path_env);
+    }
     cmd.args(build_claude_cli_args(&model, isolate_local_config));
     cmd.current_dir(&working_directory);
 
