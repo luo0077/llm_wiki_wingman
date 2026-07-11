@@ -9,10 +9,71 @@ export function normalizeSelectionReplacement(content: string): string {
   return fenced ? fenced[1] : content
 }
 
+/**
+ * Textarea selection offsets use browser-normalized LF line endings even when
+ * its assigned value came from a CRLF file. Normalize the editable snapshot so
+ * those offsets always address the same string that selectionStart describes.
+ */
+export function normalizeEditableMarkdown(content: string): string {
+  return content.replace(/\r\n?/g, "\n")
+}
+
 export interface TextSelectionSnapshot {
   prefix: string
   selectedText: string
   suffix: string
+}
+
+export interface WordDiffPart {
+  type: "equal" | "insert" | "delete"
+  value: string
+}
+
+/** Small, deterministic LCS diff for selection-sized text candidates. */
+export function buildWordDiff(original: string, replacement: string): WordDiffPart[] {
+  const left = tokenizeDiff(original)
+  const right = tokenizeDiff(replacement)
+  // Keep pathological whole-document selections from allocating an unbounded
+  // LCS matrix. The coarse fallback remains truthful and responsive.
+  if (left.length * right.length > 250_000) {
+    return [
+      ...(original ? [{ type: "delete" as const, value: original }] : []),
+      ...(replacement ? [{ type: "insert" as const, value: replacement }] : []),
+    ]
+  }
+  const rows = Array.from({ length: left.length + 1 }, () => new Uint32Array(right.length + 1))
+  for (let i = left.length - 1; i >= 0; i -= 1) {
+    for (let j = right.length - 1; j >= 0; j -= 1) {
+      rows[i][j] = left[i] === right[j]
+        ? rows[i + 1][j + 1] + 1
+        : Math.max(rows[i + 1][j], rows[i][j + 1])
+    }
+  }
+  const parts: WordDiffPart[] = []
+  let i = 0
+  let j = 0
+  while (i < left.length || j < right.length) {
+    if (i < left.length && j < right.length && left[i] === right[j]) {
+      pushDiff(parts, "equal", left[i]); i += 1; j += 1
+    } else if (j < right.length && (i === left.length || rows[i][j + 1] >= rows[i + 1][j])) {
+      pushDiff(parts, "insert", right[j]); j += 1
+    } else {
+      pushDiff(parts, "delete", left[i]); i += 1
+    }
+  }
+  return parts
+}
+
+function tokenizeDiff(value: string): string[] {
+  // Segment scripts that are commonly written without spaces by character so
+  // a short CJK edit does not mark the entire sentence as replaced.
+  return value.match(/\s+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) ?? []
+}
+
+function pushDiff(parts: WordDiffPart[], type: WordDiffPart["type"], value: string): void {
+  const previous = parts[parts.length - 1]
+  if (previous?.type === type) previous.value += value
+  else parts.push({ type, value })
 }
 
 /**

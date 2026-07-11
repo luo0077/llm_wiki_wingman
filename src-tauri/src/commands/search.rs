@@ -156,7 +156,10 @@ fn get_page_links_inner(project_path: &str, file_path: &str) -> Result<PageLinks
     let file =
         fs::canonicalize(file_path).map_err(|err| format!("Failed to resolve page path: {err}"))?;
     let wiki_root = project.join("wiki");
-    if !file.starts_with(&wiki_root) || !file.is_file() {
+    if !file.starts_with(&wiki_root)
+        || !file.is_file()
+        || file.extension().and_then(|value| value.to_str()) != Some("md")
+    {
         return Err("Page links target must be an existing Markdown file under wiki/".to_string());
     }
 
@@ -196,24 +199,13 @@ fn get_page_links_inner(project_path: &str, file_path: &str) -> Result<PageLinks
     let current = pages
         .get(&current_path)
         .ok_or_else(|| "Page is not available in the current wiki index".to_string())?;
-    let mut aliases = BTreeMap::<String, String>::new();
-    for (path, page) in &pages {
-        let wiki_relative = page.path.strip_prefix("wiki/").unwrap_or(&page.path);
-        let stem = file_stem(&page.path);
-        for alias in [
-            page.path.as_str(),
-            wiki_relative,
-            stem.as_str(),
-            page.title.as_str(),
-        ] {
-            aliases.insert(normalize_graph_alias(alias), path.clone());
-        }
-    }
-
     let mut outgoing = Vec::new();
     let mut missing = Vec::new();
     for link in &current.links {
-        if let Some(target_path) = aliases.get(&normalize_graph_alias(link)) {
+        if let Some(target_path) = resolve_reader_wikilink(&pages, link) {
+            if target_path.as_str() == current_path {
+                continue;
+            }
             if let Some(target) = pages.get(target_path) {
                 outgoing.push(PageLinkEntry {
                     title: target.title.clone(),
@@ -236,9 +228,8 @@ fn get_page_links_inner(project_path: &str, file_path: &str) -> Result<PageLinks
             continue;
         }
         let links_here = page.links.iter().any(|link| {
-            aliases
-                .get(&normalize_graph_alias(link))
-                .is_some_and(|target| target == &current_path)
+            resolve_reader_wikilink(&pages, link)
+                .is_some_and(|target| target.as_str() == current_path)
         });
         if links_here {
             backlinks.push(PageLinkEntry {
@@ -258,6 +249,30 @@ fn get_page_links_inner(project_path: &str, file_path: &str) -> Result<PageLinks
         outgoing,
         backlinks,
         missing,
+    })
+}
+
+/// Mirror `resolveRelatedSlug` in the frontend reader. Path-shaped links must
+/// match their project-relative path exactly; bare links resolve by exact
+/// filename after adding `.md`. Deliberately avoid title and fuzzy aliases so
+/// the links panel never claims a target that the rendered page cannot open.
+fn resolve_reader_wikilink<'a>(
+    pages: &'a BTreeMap<String, GraphPage>,
+    link: &str,
+) -> Option<&'a String> {
+    let link = link.trim().replace('\\', "/");
+    if link.contains('/') {
+        return pages.get_key_value(&link).map(|(path, _)| path);
+    }
+    let filename = if link.ends_with(".md") {
+        link
+    } else {
+        format!("{link}.md")
+    };
+    pages.keys().find(|path| {
+        std::path::Path::new(path.as_str())
+            .file_name()
+            .is_some_and(|name| name == filename.as_str())
     })
 }
 
@@ -1944,13 +1959,18 @@ mod tests {
         let root = tmp_project();
         write_page(
             &root,
-            "wiki/concepts/alpha.md",
-            "---\ntitle: Alpha\n---\n# Alpha\n\n[[Beta]] and [[Missing Page]].",
+            "wiki/concepts/Alpha.md",
+            "---\ntitle: Alpha\n---\n# Alpha\n\n[[Beta|label]], [[Alpha]], [[Title Only]], and [[Missing Page]].",
         );
         write_page(
             &root,
-            "wiki/concepts/beta.md",
+            "wiki/concepts/Beta.md",
             "---\ntitle: Beta\n---\n# Beta\n\nBeta details.",
+        );
+        write_page(
+            &root,
+            "wiki/concepts/different-filename.md",
+            "---\ntitle: Title Only\n---\n# Title Only\n",
         );
         write_page(
             &root,
@@ -1960,7 +1980,7 @@ mod tests {
 
         let links = get_page_links_inner(
             root.to_str().unwrap(),
-            root.join("wiki/concepts/alpha.md").to_str().unwrap(),
+            root.join("wiki/concepts/Alpha.md").to_str().unwrap(),
         )
         .unwrap();
         assert_eq!(links.outgoing.len(), 1);
@@ -1972,8 +1992,50 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("Alpha"));
+        assert_eq!(links.missing.len(), 2);
+        assert!(links
+            .missing
+            .iter()
+            .any(|entry| entry.title == "Missing Page"));
+        assert!(links
+            .missing
+            .iter()
+            .any(|entry| entry.title == "Title Only"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn page_links_require_markdown_input_and_exact_reader_paths() {
+        let root = tmp_project();
+        write_page(
+            &root,
+            "wiki/concepts/current.md",
+            "[[wiki/concepts/target.md]] [[target#section]]",
+        );
+        write_page(&root, "wiki/concepts/target.md", "# Target");
+        write_page(&root, "wiki/concepts/not-markdown.txt", "text");
+
+        let links = get_page_links_inner(
+            root.to_str().unwrap(),
+            root.join("wiki/concepts/current.md").to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(links.outgoing.len(), 1);
+        assert_eq!(
+            links.outgoing[0].path.as_deref(),
+            Some("wiki/concepts/target.md")
+        );
         assert_eq!(links.missing.len(), 1);
-        assert_eq!(links.missing[0].title, "Missing Page");
+        assert_eq!(links.missing[0].title, "target#section");
+
+        let error = get_page_links_inner(
+            root.to_str().unwrap(),
+            root.join("wiki/concepts/not-markdown.txt")
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("Markdown"));
         let _ = fs::remove_dir_all(root);
     }
 

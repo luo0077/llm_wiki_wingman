@@ -185,6 +185,14 @@ export async function getPageLinks(projectPath: string, filePath: string): Promi
   return invoke<PageLinksResponse>("get_page_links", { projectPath, filePath })
 }
 
+export async function createMissingWikiPage(
+  projectPath: string,
+  title: string,
+  content?: string,
+): Promise<string> {
+  return invoke<string>("create_missing_wiki_page", { projectPath, title, content })
+}
+
 function assertAbsoluteFsPath(operation: string, path: string): void {
   if (!isAbsolutePath(path)) {
     throw new Error(`${operation} requires an absolute path: ${path}`)

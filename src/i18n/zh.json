@@ -45,7 +45,15 @@
       "generating": "正在生成……",
       "stop": "停止",
       "askAgain": "继续询问",
-      "askOnlyHint": "该渲染选区无法唯一映射到 Markdown 源码位置。你仍可询问，但为防止误改，当前不能直接写回修改。"
+      "askOnlyHint": "该渲染选区无法唯一映射到 Markdown 源码位置。你仍可询问，但为防止误改，当前不能直接写回修改。",
+      "wordDiff": "词级修改",
+      "regenerate": "重新生成",
+      "closeReference": "关闭",
+      "requestFailed": "选区助手未能完成本次请求。",
+      "applyFailed": "无法更新选中的文本。",
+      "sourceChanged": "选中文本后文件已经发生变化。请重新选择文本，再应用修改。",
+      "referenceFailed": "无法打开引用页面。",
+      "emptyResponse": "模型没有返回回答，请重试。"
     },
     "pageLinks": {
       "button": "链接",
@@ -55,8 +63,14 @@
       "missing": "缺失链接",
       "noOutgoing": "当前页面没有出站 Wiki 链接。",
       "noBacklinks": "暂无其他页面链接到这里。",
-      "noMissing": "所有 Wiki 链接都能解析到现有页面。"
-    }
+      "noMissing": "所有 Wiki 链接都能解析到现有页面。",
+      "create": "创建",
+      "draft": "Agent 草稿",
+      "loadFailed": "无法加载页面链接。",
+      "createFailed": "无法创建缺失页面。",
+      "emptyDraftError": "模型返回了空白草稿。"
+    },
+    "rawMarkdownEditor": "Markdown 源码编辑器"
   },
   "research": {
     "title": "深度研究",
