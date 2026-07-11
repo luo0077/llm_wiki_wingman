@@ -1230,22 +1230,7 @@ async function autoIngestImpl(
   // task for retry rather than "success".
   if (!hasSourceSummary && !signal?.aborted) {
     const date = new Date().toISOString().slice(0, 10)
-    const fallbackContent = [
-      "---",
-      `type: source`,
-      `title: "Source: ${sourceIdentity}"`,
-      `created: ${date}`,
-      `updated: ${date}`,
-      `sources: ["${sourceIdentity}"]`,
-      `tags: []`,
-      `related: []`,
-      "---",
-      "",
-      `# Source: ${sourceIdentity}`,
-      "",
-      analysis ? analysis.slice(0, 3000) : "(Analysis not available)",
-      "",
-    ].join("\n")
+    const fallbackContent = buildFallbackSourceSummary(sourceIdentity, analysis, date)
     try {
       await writeFile(sourceSummaryFullPath, fallbackContent)
       writtenPaths.push(sourceSummaryPath)
@@ -1739,6 +1724,32 @@ export function currentWikiDate(now: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
+export function buildFallbackSourceSummary(
+  sourceIdentity: string,
+  analysis: string,
+  date: string,
+): string {
+  return [
+    "---",
+    "type: source",
+    `title: "Source: ${sourceIdentity}"`,
+    `created: ${date}`,
+    `updated: ${date}`,
+    `sources: ["${sourceIdentity}"]`,
+    "tags: []",
+    "related: []",
+    "---",
+    "",
+    `# Source: ${sourceIdentity}`,
+    "",
+    // This is a recovery page, so preserving the complete analysis matters
+    // more than keeping the page short. Truncating here used to create
+    // syntactically valid but silently incomplete source summaries.
+    analysis || "(Analysis not available)",
+    "",
+  ].join("\n")
+}
+
 export function stampGeneratedFrontmatterDates(content: string, date: string): string {
   const fmRe = /^(---\s*\r?\n)([\s\S]*?)(\r?\n---\s*(?:\r?\n|$))/
   const match = content.match(fmRe)
@@ -1907,6 +1918,13 @@ async function writeFileBlocks(
         // body + array-field union" with a best-effort backup.
         // See page-merge.ts.
         const existing = await tryReadFile(fullPath)
+        // Re-ingesting a corrected source must replace pages owned solely by
+        // that source. Merging the old body back into the new generation kept
+        // retracted wording alive indefinitely. Multi-source pages still use
+        // the merger because their other sources' contributions must survive.
+        const replaceExistingBody = Boolean(
+          existing && isOwnedOnlyBySource(existing, sourceFileName),
+        )
         const merged = await mergePageContent(
           content,
           existing || null,
@@ -1916,6 +1934,7 @@ async function writeFileBlocks(
             pagePath: relativePath,
             signal,
             backup: (oldContent) => backupExistingPage(projectPath, relativePath, oldContent),
+            replaceExistingBody,
           },
         )
         // The merge unions existing frontmatter arrays, so sanitize again to
@@ -1934,6 +1953,15 @@ async function writeFileBlocks(
   }
 
   return { writtenPaths, warnings, hardFailures }
+}
+
+function isOwnedOnlyBySource(content: string, sourceIdentity: string): boolean {
+  const sources = parseSources(content)
+  if (sources.length === 0) return false
+  const expected = sourceReferenceIdentity(sourceIdentity).toLowerCase()
+  return sources.every(
+    (source) => sourceReferenceIdentity(source).toLowerCase() === expected,
+  )
 }
 
 const REVIEW_BLOCK_REGEX = /---REVIEW:\s*(\w[\w-]*)\s*\|\s*(.+?)\s*---\n([\s\S]*?)---END REVIEW---/g
