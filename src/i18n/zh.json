@@ -222,6 +222,12 @@
       "agents": "Agents"
     },
     "agentMode": "Agent 模式",
+    "retrievalMode": "检索模式",
+    "retrievalModeHint": "传统检索保持现有行为；智能检索会在严格预算内根据证据缺口迭代检索。",
+    "retrievalModes": {
+      "standard": "传统检索",
+      "smart": "智能检索"
+    },
     "agentModes": {
       "fast": "快速",
       "standard": "标准",

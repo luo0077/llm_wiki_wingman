@@ -222,6 +222,12 @@
       "agents": "Agents"
     },
     "agentMode": "Agent mode",
+    "retrievalMode": "Retrieval mode",
+    "retrievalModeHint": "Standard keeps the existing retrieval behavior. Smart iteratively closes evidence gaps under a strict budget.",
+    "retrievalModes": {
+      "standard": "Standard retrieval",
+      "smart": "Smart retrieval"
+    },
     "agentModes": {
       "fast": "Fast",
       "standard": "Standard",
