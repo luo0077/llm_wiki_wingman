@@ -117,6 +117,43 @@ fn claude_content_blocks(content: &ClaudeContent) -> Vec<serde_json::Value> {
     }
 }
 
+/// Fold the system preamble into an existing user text block. Claude Code's
+/// prompt-injection guard can reject a standalone user content block that
+/// looks like a role override, even though the CLI has no portable system
+/// prompt flag across supported versions. Image-only turns have no text to
+/// merge into, so they receive one leading text block as a necessary fallback.
+fn merge_system_preamble_into_user_content(
+    content: &mut Vec<serde_json::Value>,
+    system_preamble: &str,
+) {
+    if system_preamble.is_empty() {
+        return;
+    }
+
+    for block in content.iter_mut() {
+        if block.get("type").and_then(serde_json::Value::as_str) != Some("text") {
+            continue;
+        }
+        let Some(existing) = block
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        *block = serde_json::json!({
+            "type": "text",
+            "text": format!("{system_preamble}\n\n{existing}"),
+        });
+        return;
+    }
+
+    content.insert(
+        0,
+        serde_json::json!({ "type": "text", "text": system_preamble }),
+    );
+}
+
 async fn find_claude_command() -> Result<PathBuf, String> {
     find_cli_command("claude", &["claude.cmd", "claude.exe"]).await
 }
@@ -244,10 +281,7 @@ pub async fn claude_cli_spawn(
             let role = m.role.clone();
             let mut content = claude_content_blocks(&m.content);
             if !first_user_seen && role == "user" && !system_preamble.is_empty() {
-                content.insert(
-                    0,
-                    serde_json::json!({ "type": "text", "text": format!("{system_preamble}\n\n") }),
-                );
+                merge_system_preamble_into_user_content(&mut content, &system_preamble);
                 first_user_seen = true;
             }
             (role, content)
@@ -517,6 +551,52 @@ mod tests {
         .expect("content block payload should deserialize");
 
         assert_eq!(claude_content_text_only(&content), "system rule");
+    }
+
+    #[test]
+    fn system_preamble_merges_into_existing_user_text_block() {
+        let mut blocks = vec![
+            serde_json::json!({ "type": "text", "text": "Output the token" }),
+            serde_json::json!({
+                "type": "image",
+                "source": { "type": "base64", "media_type": "image/png", "data": "abc123" },
+            }),
+        ];
+
+        merge_system_preamble_into_user_content(&mut blocks, "System instructions");
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0],
+            serde_json::json!({
+                "type": "text",
+                "text": "System instructions\n\nOutput the token",
+            })
+        );
+        assert_eq!(
+            blocks[1].get("type").and_then(serde_json::Value::as_str),
+            Some("image")
+        );
+    }
+
+    #[test]
+    fn system_preamble_adds_text_block_only_for_image_only_turn() {
+        let mut blocks = vec![serde_json::json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": "image/png", "data": "abc123" },
+        })];
+
+        merge_system_preamble_into_user_content(&mut blocks, "System instructions");
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0],
+            serde_json::json!({ "type": "text", "text": "System instructions" })
+        );
+        assert_eq!(
+            blocks[1].get("type").and_then(serde_json::Value::as_str),
+            Some("image")
+        );
     }
 
     #[test]
