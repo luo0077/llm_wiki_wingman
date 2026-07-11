@@ -118,6 +118,48 @@ describe("runSemanticLint — language directive", () => {
   })
 })
 
+describe("runSemanticLint — missing-page false positives (#537)", () => {
+  it("drops missing-page findings when the entity page already exists", async () => {
+    const pages = [
+      makeFileNode("概念页.md", "介绍 [[维特根斯坦]]、[[阿德勒]] 和 [[尼采]] 的概念页"),
+      makeFileNode("维特根斯坦.md", "维特根斯坦是一位哲学家。"), // entity page EXISTS
+      makeFileNode("阿德勒.md", "阿德勒是一位心理学家。"), // entity page EXISTS
+    ]
+    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
+    mockReadFile.mockImplementation(async (path) => {
+      const match = pages.find((p) => p.node.path === path)
+      return match?.content ?? ""
+    })
+    // The LLM wrongly reports missing-page for entities that already have pages,
+    // using free-form Chinese titles that don't match a known "缺失页面:" prefix.
+    const llm = [
+      "---LINT: missing-page | warning | 维特根斯坦---", // bare name, page exists
+      "维特根斯坦在概念页中被引用但未建立独立实体页。",
+      "PAGES: 概念页.md",
+      "---END LINT---",
+      "---LINT: missing-page | warning | 阿德勒实体页缺失---", // name + suffix, page exists
+      "阿德勒被引用但缺少页面。",
+      "PAGES: 概念页.md",
+      "---END LINT---",
+      "---LINT: missing-page | warning | 尼采---", // genuinely missing (no page)
+      "尼采被引用但没有页面。",
+      "PAGES: 概念页.md",
+      "---END LINT---",
+    ].join("\n")
+    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
+      cb.onToken(llm)
+      cb.onDone()
+    })
+
+    const results = await runSemanticLint("/project", fakeLlmConfig())
+
+    const missingPages = results.filter((r) => r.detail.includes("[missing-page]"))
+    // The two existing-entity false positives are filtered; only 尼采 remains.
+    expect(missingPages).toHaveLength(1)
+    expect(missingPages[0].page).toBe("尼采")
+  })
+})
+
 describe("runSemanticLint — activity & early returns", () => {
   it("logs a running activity item and marks done", async () => {
     mockListDirectory.mockResolvedValue([makeFileNode("a.md", "content").node])
