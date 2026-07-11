@@ -443,12 +443,14 @@ export function ChatPanel() {
   const useWebSearch = useChatStore((s) => s.useWebSearch)
   const useAnyTxtSearch = useChatStore((s) => s.useAnyTxtSearch)
   const agentMode = useChatStore((s) => s.agentMode)
+  const retrievalMode = useChatStore((s) => s.retrievalMode)
   const selectedSkills = useChatStore((s) => s.selectedSkills)
   const selectedContextFiles = useChatStore((s) => s.selectedContextFiles)
   const disabledSkills = useChatStore((s) => s.disabledSkills)
   const setUseWebSearch = useChatStore((s) => s.setUseWebSearch)
   const setUseAnyTxtSearch = useChatStore((s) => s.setUseAnyTxtSearch)
   const setAgentMode = useChatStore((s) => s.setAgentMode)
+  const setRetrievalMode = useChatStore((s) => s.setRetrievalMode)
   const setSelectedSkills = useChatStore((s) => s.setSelectedSkills)
   const setSelectedContextFiles = useChatStore((s) => s.setSelectedContextFiles)
 
@@ -687,6 +689,7 @@ export function ChatPanel() {
         useWebSearch: useChatStore.getState().useWebSearch,
         useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
         agentMode: useChatStore.getState().agentMode,
+        retrievalMode: useChatStore.getState().retrievalMode,
         skills: useChatStore.getState().selectedSkills,
         contextFiles: useChatStore.getState().selectedContextFiles,
         skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
@@ -950,6 +953,7 @@ export function ChatPanel() {
                 sessionId: convId,
                 runId: backendRunId,
                 mode: sendOptions.agentMode,
+                retrievalMode: sendOptions.retrievalMode,
                 stream: true,
                 tools: {
                   wiki: true,
@@ -1027,6 +1031,7 @@ export function ChatPanel() {
             runId: backendRunId,
             persistSession: false,
             mode: sendOptions.agentMode,
+            retrievalMode: sendOptions.retrievalMode,
             tools: {
               wiki: true,
               web: sendOptions.useWebSearch,
@@ -1309,6 +1314,7 @@ export function ChatPanel() {
         useWebSearch: useChatStore.getState().useWebSearch,
         useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
         agentMode: useChatStore.getState().agentMode,
+        retrievalMode: useChatStore.getState().retrievalMode,
         skills: useChatStore.getState().selectedSkills,
         contextFiles: useChatStore.getState().selectedContextFiles,
         skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
@@ -1340,6 +1346,7 @@ export function ChatPanel() {
       useWebSearch: useChatStore.getState().useWebSearch,
       useAnyTxtSearch: useChatStore.getState().useAnyTxtSearch,
       agentMode: useChatStore.getState().agentMode,
+      retrievalMode: useChatStore.getState().retrievalMode,
       skills: useChatStore.getState().selectedSkills,
       contextFiles: useChatStore.getState().selectedContextFiles,
       skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
@@ -1432,6 +1439,7 @@ export function ChatPanel() {
           useWebSearch={useWebSearch}
           useAnyTxtSearch={useAnyTxtSearch}
           agentMode={agentMode}
+          retrievalMode={retrievalMode}
           availableSkills={availableSkills}
           selectedSkills={selectedSkills}
           availableContextFiles={availableContextFiles}
@@ -1439,6 +1447,7 @@ export function ChatPanel() {
           onUseWebSearchChange={setUseWebSearch}
           onUseAnyTxtSearchChange={setUseAnyTxtSearch}
           onAgentModeChange={setAgentMode}
+          onRetrievalModeChange={setRetrievalMode}
           onSelectedSkillsChange={setSelectedSkills}
           onSelectedContextFilesChange={setSelectedContextFiles}
           anyTxtAvailable={anyTxtAvailable}
