@@ -27,6 +27,7 @@ import type { EmbeddingConfig } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { chunkMarkdown, type Chunk } from "@/lib/text-chunker"
+import { parseFrontmatter } from "@/lib/frontmatter"
 
 // ── Error surfacing ──────────────────────────────────────────────────────
 
@@ -259,9 +260,10 @@ type PageEmbeddingPreparation =
   | { status: "empty" }
   | { status: "failed"; reason: string }
 
-function extractEmbeddingTitle(content: string, fallbackId: string): string {
-  const titleMatch = content.match(/^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$/m)
-  return titleMatch ? titleMatch[1].trim() : fallbackId
+/** @internal Exported for unit tests only. */
+export function extractEmbeddingTitle(content: string, fallbackId: string): string {
+  const title = parseFrontmatter(content).frontmatter?.title
+  return typeof title === "string" && title.trim() ? title.trim() : fallbackId
 }
 
 async function preparePageEmbeddingRows(

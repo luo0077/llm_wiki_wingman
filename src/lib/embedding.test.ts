@@ -38,6 +38,7 @@ import {
   getEmbeddingCount,
   removePageEmbedding,
   resetEmbeddingOptimizeAccountingForTests,
+  extractEmbeddingTitle,
   type PageSearchResult,
 } from "./embedding"
 
@@ -1964,5 +1965,21 @@ describe("legacyVectorRowCount / dropLegacyVectorTable / getEmbeddingCount / rem
     mockInvoke.mockRejectedValueOnce(new Error("table missing"))
     // Must not throw — source-delete flow depends on silent failure.
     await expect(removePageEmbedding("/proj", "rope")).resolves.toBeUndefined()
+  })
+})
+
+describe("extractEmbeddingTitle", () => {
+  it("does not read a body prose line starting with title: as the frontmatter title", () => {
+    const content = "---\ntype: entity\n---\n# Real Heading\n\nSome text.\ntitle: not-frontmatter-at-all\n"
+    expect(extractEmbeddingTitle(content, "mypage")).toBe("mypage")
+  })
+
+  it("still uses a genuine frontmatter title", () => {
+    const content = "---\ntitle: Real Title\n---\n# Real Title\n"
+    expect(extractEmbeddingTitle(content, "mypage")).toBe("Real Title")
+  })
+
+  it("falls back to fallbackId when there is no frontmatter at all", () => {
+    expect(extractEmbeddingTitle("# Just a heading\n\nBody text.", "mypage")).toBe("mypage")
   })
 })
