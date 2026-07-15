@@ -40,3 +40,6 @@ export const OUTPUT_LANGUAGE_OPTIONS = [
   { value: "Thai", label: "ไทย (Thai)" },
   { value: "Ukrainian", label: "Українська (Ukrainian)" },
 ] as const
+
+/** Canonical persisted values accepted by output-language settings. */
+export type OutputLanguage = (typeof OUTPUT_LANGUAGE_OPTIONS)[number]["value"]

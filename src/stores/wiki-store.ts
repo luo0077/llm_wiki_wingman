@@ -7,6 +7,7 @@ import {
   type ProjectPathIndex,
 } from "@/lib/wiki-page-resolver"
 import { DEFAULT_GRAPH_FILTERS, type GraphFilterState } from "@/lib/graph-filters"
+import type { OutputLanguage } from "@/lib/output-language-options"
 
 /**
  * Wire protocol used when `provider === "custom"`. Other providers have a
@@ -277,37 +278,6 @@ interface MultimodalConfig {
   /** Max parallel caption requests during ingest. >=1. */
   concurrency: number
 }
-
-/**
- * Output language for LLM-generated content (wiki pages, chat responses, research).
- * "auto" = detect from user input / source document language.
- * Otherwise = force all LLM output to use the specified language.
- */
-type OutputLanguage =
-  | "auto"
-  | "English"
-  | "Chinese"
-  | "Traditional Chinese"
-  | "Japanese"
-  | "Korean"
-  | "Vietnamese"
-  | "French"
-  | "German"
-  | "Spanish"
-  | "Portuguese"
-  | "Italian"
-  | "Russian"
-  | "Arabic"
-  | "Persian"
-  | "Hindi"
-  | "Turkish"
-  | "Dutch"
-  | "Polish"
-  | "Czech"
-  | "Swedish"
-  | "Indonesian"
-  | "Thai"
-  | "Ukrainian"
 
 /**
  * Per-preset saved fields. Each entry survives turning the preset off
