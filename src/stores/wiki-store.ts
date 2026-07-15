@@ -255,11 +255,29 @@ interface SourceWatchConfig {
 }
 
 export type MineruModelVersion = "pipeline" | "vlm"
+export type MineruLocalBackend =
+  | "pipeline"
+  | "vlm-engine"
+  | "hybrid-engine"
+  | "vlm-http-client"
+  | "hybrid-http-client"
+export type MineruParseMethod = "auto" | "txt" | "ocr"
+export type MineruEffort = "medium" | "high"
 
 export interface MineruConfig {
   enabled: boolean
   /** Parsing backend: MinerU cloud API (default) or a self-hosted local service. */
   backend?: "cloud" | "local"
+  /** Base URL of a compatible self-hosted MinerU HTTP wrapper. */
+  localEndpoint?: string
+  localBackend?: MineruLocalBackend
+  localEffort?: MineruEffort
+  localParseMethod?: MineruParseMethod
+  localLanguage?: string
+  localFormulaEnabled?: boolean
+  localTableEnabled?: boolean
+  localImageAnalysis?: boolean
+  localServerUrl?: string
   token: string
   modelVersion: MineruModelVersion
 }
@@ -521,7 +539,21 @@ export const useWikiStore = create<WikiState>((set) => ({
   },
 
   sourceWatchConfig: DEFAULT_SOURCE_WATCH_CONFIG,
-  mineruConfig: { enabled: false, token: "", modelVersion: "vlm" },
+  mineruConfig: {
+    enabled: false,
+    backend: "cloud",
+    localEndpoint: "http://127.0.0.1:8000",
+    localBackend: "hybrid-engine",
+    localEffort: "medium",
+    localParseMethod: "auto",
+    localLanguage: "ch",
+    localFormulaEnabled: true,
+    localTableEnabled: true,
+    localImageAnalysis: true,
+    localServerUrl: "",
+    token: "",
+    modelVersion: "vlm",
+  },
 
   // Default `enabled: true` preserves the pre-toggle behavior: anyone
   // who already had `LLM_WIKI_API_TOKEN` set or `apiConfig.token`

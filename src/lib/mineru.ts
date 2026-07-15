@@ -6,9 +6,10 @@ import { getFileName, normalizePath } from "@/lib/path-utils"
 import type { SavedImage } from "@/lib/extract-source-images"
 
 const API_BASE = "https://mineru.net/api/v4"
-const LOCAL_API_BASE = "http://127.0.0.1:8790/api/mineru-local"
+export const DEFAULT_LOCAL_MINERU_ENDPOINT = "http://127.0.0.1:8000"
 const POLL_INTERVAL_MS = 3_000
 const POLL_TIMEOUT_MS = 300_000 // 5 minutes
+const LOCAL_POLL_TIMEOUT_MS = 3_600_000 // Official mineru-api tasks can include model cold starts.
 const MAX_ACCURATE_PARSE_BYTES = 200 * 1024 * 1024
 const MINERU_IMAGE_EXTS = new Set([
   "png",
@@ -75,6 +76,20 @@ interface MineruAssetOptions {
 interface MineruExtractedMarkdown {
   markdown: string
   savedImages: SavedImage[]
+}
+
+function localMineruApiBase(endpoint: string | undefined): string {
+  const candidate = endpoint?.trim() || DEFAULT_LOCAL_MINERU_ENDPOINT
+  let parsed: URL
+  try {
+    parsed = new URL(candidate)
+  } catch {
+    throw new Error("Local MinerU endpoint must be a valid HTTP(S) URL")
+  }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error("Local MinerU endpoint must be an HTTP(S) URL without credentials")
+  }
+  return candidate.replace(/\/+$/, "")
 }
 
 // ── API calls ──
@@ -625,54 +640,131 @@ async function downloadAndExtractMarkdown(
 // ── Local backend ──
 
 /**
- * Parse a document using a self-hosted MinerU service (no token required).
- * The service accepts a JSON body with base64 file content and exposes
- * task polling + result endpoints. Selected via `config.backend === "local"`.
+ * Parse a document through the official `mineru-api` asynchronous protocol.
+ * Files are submitted as multipart/form-data to `/tasks`; the task status and
+ * result contracts mirror MinerU's own API client.
  */
 async function parseWithLocalMineru(
+  config: MineruConfig,
   sourcePath: string,
   fileName: string,
   onProgress?: (msg: string) => void,
   signal?: AbortSignal,
-): Promise<string> {
+  assetOptions?: MineruAssetOptions,
+): Promise<MineruExtractedMarkdown> {
   const httpFetch = await getHttpFetch()
+  const apiBase = localMineruApiBase(config.localEndpoint)
+  if (config.localBackend?.endsWith("http-client") && !config.localServerUrl?.trim()) {
+    throw new Error("MinerU HTTP client backends require a model server URL")
+  }
+  const fileSize = await getFileSize(sourcePath)
+  if (fileSize > MAX_ACCURATE_PARSE_BYTES) {
+    throw new Error("MinerU accurate parsing supports files up to 200 MB")
+  }
+  throwIfAborted(signal)
   const { base64 } = await readFileAsBase64(sourcePath)
+  const bytes = decodeBase64ToBytes(base64)
+  const fileBuffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer
+  const form = new FormData()
+  form.append("files", new Blob([fileBuffer], { type: "application/pdf" }), fileName)
+  form.append("lang_list", config.localLanguage || "ch")
+  form.append("backend", config.localBackend || "hybrid-engine")
+  form.append("effort", config.localEffort || "medium")
+  form.append("parse_method", config.localParseMethod || "auto")
+  form.append("formula_enable", String(config.localFormulaEnabled !== false))
+  form.append("table_enable", String(config.localTableEnabled !== false))
+  form.append("image_analysis", String(config.localImageAnalysis !== false))
+  form.append("return_md", "true")
+  form.append("return_images", String(Boolean(assetOptions)))
+  form.append("response_format_zip", "false")
+  if (config.localServerUrl?.trim()) form.append("server_url", config.localServerUrl.trim())
 
   onProgress?.("Uploading to local MinerU...")
-  const submitRes = await httpFetch(`${LOCAL_API_BASE}/parse`, {
+  const submitRes = await httpFetch(`${apiBase}/tasks`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     signal,
-    body: JSON.stringify({ file: base64, filename: fileName }),
+    body: form,
   })
   if (!submitRes.ok) {
     const text = await submitRes.text().catch(() => "")
     throw new Error(`Local MinerU submit failed: HTTP ${submitRes.status}: ${text}`)
   }
 
-  const submitData = await submitRes.json()
-  const taskId = submitData.task_id
+  const submitData = await submitRes.json() as { task_id?: unknown }
+  const taskId = typeof submitData.task_id === "string" ? submitData.task_id.trim() : ""
   if (!taskId) throw new Error("Local MinerU returned no task ID")
+  const encodedTaskId = encodeURIComponent(taskId)
+  // Keep all follow-up requests pinned to the user-configured service. The
+  // official response includes absolute URLs, but following arbitrary values
+  // from a compromised or incompatible server would create an SSRF redirect.
+  const statusUrl = `${apiBase}/tasks/${encodedTaskId}`
+  const resultUrl = `${apiBase}/tasks/${encodedTaskId}/result`
 
   onProgress?.("Waiting for local MinerU to finish...")
   const start = Date.now()
-  while (Date.now() - start < POLL_TIMEOUT_MS) {
+  while (Date.now() - start < LOCAL_POLL_TIMEOUT_MS) {
     throwIfAborted(signal)
 
-    const statusRes = await httpFetch(`${LOCAL_API_BASE}/tasks/${taskId}`, { signal })
+    const statusRes = await httpFetch(statusUrl, { signal })
     if (!statusRes.ok) {
       throw new Error(`Local MinerU status check failed: HTTP ${statusRes.status}`)
     }
     const status = await statusRes.json()
 
-    if (status.status === "done") {
+    if (status.status === "completed") {
       onProgress?.("Downloading parsed result...")
-      const resultRes = await httpFetch(`${LOCAL_API_BASE}/results/${taskId}`, { signal })
+      const resultRes = await httpFetch(resultUrl, { signal })
       if (!resultRes.ok) {
         throw new Error(`Local MinerU download failed: HTTP ${resultRes.status}`)
       }
-      const result = await resultRes.json()
-      return result.content || ""
+      const result = await resultRes.json() as {
+        results?: Record<string, { md_content?: unknown; images?: unknown }>
+      }
+      const first = result.results && Object.values(result.results)[0]
+      if (!first || typeof first.md_content !== "string" || !first.md_content.trim()) {
+        throw new Error("Local MinerU returned an empty parsing result")
+      }
+      let markdown = convertHtmlTablesToMarkdown(first.md_content)
+      const savedImages: SavedImage[] = []
+      const pathMap = new Map<string, string>()
+      if (assetOptions && first.images && typeof first.images === "object") {
+        const mediaDir = `${normalizePath(assetOptions.projectPath)}/wiki/media/${assetOptions.sourceSummarySlug}/mineru/images`
+        await createDirectory(mediaDir)
+        for (const [rawName, rawData] of Object.entries(first.images)) {
+          throwIfAborted(signal)
+          if (typeof rawData !== "string") continue
+          const match = rawData.match(/^data:(image\/[^;]+);base64,(.+)$/s)
+          if (!match) continue
+          const sourceName = getFileName(normalizeMineruZipPath(rawName))
+          if (!sourceName || !isMineruImagePath(sourceName)) continue
+          const extension = sourceName.split(".").pop()?.toLowerCase()
+          if (!extension) continue
+          // Server-provided names are untrusted and may collide or contain a
+          // Windows reserved device name. Generate deterministic local names
+          // while retaining lookup entries for the original Markdown target.
+          const safeName = `image-${savedImages.length + 1}.${extension}`
+          const absPath = `${mediaDir}/${safeName}`
+          const relPath = `media/${assetOptions.sourceSummarySlug}/mineru/images/${safeName}`
+          await writeFileBase64(absPath, match[2])
+          savedImages.push({
+            index: savedImages.length,
+            mimeType: match[1],
+            page: null,
+            width: 0,
+            height: 0,
+            relPath,
+            absPath,
+            sha256: "",
+          })
+          pathMap.set(rawName, relPath)
+          pathMap.set(sourceName, relPath)
+        }
+      }
+      if (pathMap.size > 0) markdown = rewriteMineruMarkdownImages(markdown, pathMap)
+      return { markdown, savedImages }
     }
     if (status.status === "failed") {
       throw new Error(`Local MinerU parsing failed: ${status.error || "unknown error"}`)
@@ -717,10 +809,17 @@ export async function parseWithMineruResult(
   throwIfAborted(signal)
 
   if (config.backend === "local") {
-    const fileName = sourcePath.split("/").pop() ?? "document.pdf"
-    const markdown = await parseWithLocalMineru(sourcePath, fileName, onProgress, signal)
+    const fileName = getFileName(sourcePath) || "document.pdf"
+    const result = await parseWithLocalMineru(
+      config,
+      sourcePath,
+      fileName,
+      onProgress,
+      signal,
+      assetOptions,
+    )
     onProgress?.("Done")
-    return { markdown, savedImages: [] }
+    return result
   }
 
   if (!config.token) throw new Error("MinerU API token not configured")
@@ -774,15 +873,19 @@ export async function parseWithMineruResult(
  */
 export async function testMineruConnection(
   token: string,
-  config?: Pick<MineruConfig, "backend">,
+  config?: Pick<MineruConfig, "backend" | "localEndpoint">,
 ): Promise<void> {
   const httpFetch = await getHttpFetch()
 
   if (config?.backend === "local") {
-    const res = await httpFetch(`${LOCAL_API_BASE}/health`)
+    const res = await httpFetch(`${localMineruApiBase(config.localEndpoint)}/health`)
     if (!res.ok) {
       const text = await res.text().catch(() => "")
       throw new Error(`Local MinerU service unavailable: HTTP ${res.status}: ${text}`)
+    }
+    const health = await res.json().catch(() => null) as { status?: unknown } | null
+    if (health?.status !== "healthy") {
+      throw new Error("Local MinerU service returned an invalid or unhealthy status")
     }
     return
   }

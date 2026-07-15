@@ -653,7 +653,8 @@ async function autoIngestImpl(
   const mineruCfg = useWikiStore.getState().mineruConfig
   let mineruSucceeded = false
   let mineruSavedImages: SavedImage[] = []
-  if (isPdf && mineruCfg.enabled && mineruCfg.token) {
+  const mineruConfigured = mineruCfg.backend === "local" || Boolean(mineruCfg.token)
+  if (isPdf && mineruCfg.enabled && mineruConfigured) {
     try {
       const cacheDir = sp.substring(0, sp.lastIndexOf("/"))
       const cachePath = `${cacheDir}/.cache/${fileName}.txt`

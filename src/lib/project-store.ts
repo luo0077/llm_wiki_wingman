@@ -112,10 +112,40 @@ export async function loadMultimodalConfig(): Promise<MultimodalConfig | null> {
 }
 
 const MINERU_KEY = "mineruConfig"
+const DEFAULT_LOCAL_MINERU_ENDPOINT = "http://127.0.0.1:8000"
+const LOCAL_MINERU_BACKENDS = new Set([
+  "pipeline",
+  "vlm-engine",
+  "hybrid-engine",
+  "vlm-http-client",
+  "hybrid-http-client",
+])
 
 function normalizeMineruConfig(config: MineruConfig): MineruConfig {
   return {
     enabled: config.enabled === true,
+    backend: config.backend === "local" ? "local" : "cloud",
+    localEndpoint:
+      typeof config.localEndpoint === "string" && config.localEndpoint.trim()
+        ? config.localEndpoint.trim()
+        : DEFAULT_LOCAL_MINERU_ENDPOINT,
+    localBackend: LOCAL_MINERU_BACKENDS.has(config.localBackend ?? "")
+      ? config.localBackend
+      : "hybrid-engine",
+    localEffort: config.localEffort === "high" ? "high" : "medium",
+    localParseMethod:
+      config.localParseMethod === "txt" || config.localParseMethod === "ocr"
+        ? config.localParseMethod
+        : "auto",
+    localLanguage:
+      typeof config.localLanguage === "string" && config.localLanguage.trim()
+        ? config.localLanguage.trim()
+        : "ch",
+    localFormulaEnabled: config.localFormulaEnabled !== false,
+    localTableEnabled: config.localTableEnabled !== false,
+    localImageAnalysis: config.localImageAnalysis !== false,
+    localServerUrl:
+      typeof config.localServerUrl === "string" ? config.localServerUrl.trim() : "",
     token: typeof config.token === "string" ? config.token : "",
     modelVersion: config.modelVersion === "pipeline" ? "pipeline" : "vlm",
   }

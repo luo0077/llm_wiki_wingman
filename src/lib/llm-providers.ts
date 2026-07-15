@@ -799,6 +799,17 @@ function buildGoogleBody(
   }
 }
 
+/**
+ * Convert the character-based response reserve into an Anthropic output-token
+ * limit. The lower bound is defensive: settings UI enforces a useful context
+ * size, but migrated or hand-edited persisted configuration must never produce
+ * the protocol-invalid `max_tokens: 0` value.
+ */
+export function deriveAnthropicMaxTokens(maxContextSize: number | undefined): number {
+  const { responseReserve } = computeContextBudget(maxContextSize)
+  return Math.max(1, Math.min(16_384, Math.floor(responseReserve / 3)))
+}
+
 export function getProviderConfig(config: LlmConfig): ProviderConfig {
   const { provider, apiKey, model, ollamaUrl, customEndpoint } = config
 
@@ -808,8 +819,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
   // at 16 384 to stay within typical per-request limits. Explicit
   // overrides from callers (e.g. max_tokens: 300 for routing decisions)
   // always take precedence because they are spread after this value.
-  const { responseReserve } = computeContextBudget(config.maxContextSize)
-  const anthropicBudgetTokens = Math.min(16_384, Math.floor(responseReserve / 3))
+  const anthropicBudgetTokens = deriveAnthropicMaxTokens(config.maxContextSize)
 
   switch (provider) {
     case "openai":

@@ -194,6 +194,12 @@ describe("autoIngest source summary paths", () => {
         apiKey: "",
         model: "",
       },
+      mineruConfig: {
+        enabled: false,
+        backend: "cloud",
+        token: "",
+        modelVersion: "vlm",
+      },
     })
   })
 
@@ -667,6 +673,34 @@ describe("autoIngest source summary paths", () => {
       ),
     ).toBe(true)
     updateSpy.mockRestore()
+  })
+
+  it("uses a configured local MinerU backend without a cloud token", async () => {
+    if (!tmp) throw new Error("missing temp project")
+    sourceMarkers = ["local mineru source"]
+    await writeFileRaw(`${tmp.path}/raw/sources/project-a/local.pdf`, "pdf fallback text\n")
+    useWikiStore.setState({
+      mineruConfig: {
+        enabled: true,
+        backend: "local",
+        token: "",
+        modelVersion: "vlm",
+      },
+    })
+    mockParseWithMineru.mockResolvedValueOnce({
+      markdown: "local MinerU markdown",
+      savedImages: [],
+    })
+
+    await autoIngest(
+      tmp.path,
+      `${tmp.path}/raw/sources/project-a/local.pdf`,
+      useWikiStore.getState().llmConfig,
+      undefined,
+      "project-a",
+    )
+
+    expect(mockParseWithMineru).toHaveBeenCalled()
   })
 
   it("does not fall back to built-in PDF extraction when MinerU is cancelled", async () => {
