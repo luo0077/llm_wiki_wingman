@@ -54,4 +54,30 @@ describe("buildWikiGraph frontmatter extraction", () => {
     expect(graph.nodes).toHaveLength(1)
     expect(graph.nodes[0].type).toBe("other")
   })
+
+  it("parses CRLF frontmatter consistently with the rest of the application", async () => {
+    const buildWikiGraph = await loadBuildWikiGraph()
+    mockListDirectory.mockResolvedValue([mdFile("page.md")])
+    mockReadFile.mockResolvedValue(
+      "---\r\ntitle: CRLF Page\r\ntype: entity\r\n---\r\n# Fallback Heading\r\n",
+    )
+
+    const graph = await buildWikiGraph("/project")
+
+    expect(graph.nodes).toHaveLength(1)
+    expect(graph.nodes[0]).toMatchObject({ label: "CRLF Page", type: "entity" })
+  })
+
+  it("uses YAML parsing for quoted values that contain a colon", async () => {
+    const buildWikiGraph = await loadBuildWikiGraph()
+    mockListDirectory.mockResolvedValue([mdFile("page.md")])
+    mockReadFile.mockResolvedValue(
+      '---\ntitle: "Attention: Architecture"\ntype: "Concept"\n---\n# Fallback Heading\n',
+    )
+
+    const graph = await buildWikiGraph("/project")
+
+    expect(graph.nodes).toHaveLength(1)
+    expect(graph.nodes[0]).toMatchObject({ label: "Attention: Architecture", type: "concept" })
+  })
 })

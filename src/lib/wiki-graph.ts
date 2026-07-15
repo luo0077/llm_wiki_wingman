@@ -2,6 +2,7 @@ import { readFile, listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { buildRetrievalGraph, calculateRelevance } from "./graph-relevance"
 import { normalizePath } from "@/lib/path-utils"
+import { parseFrontmatter } from "@/lib/frontmatter"
 import Graph from "graphology"
 import louvain from "graphology-communities-louvain"
 
@@ -126,15 +127,9 @@ function flattenMdFiles(nodes: FileNode[]): FileNode[] {
   return files
 }
 
-function extractFrontmatterBlock(content: string): string {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  return fmMatch ? fmMatch[1] : ""
-}
-
 function extractTitle(content: string, fileName: string): string {
-  const frontmatter = extractFrontmatterBlock(content)
-  const frontmatterTitleMatch = frontmatter.match(/^title:\s*["']?(.+?)["']?\s*$/m)
-  if (frontmatterTitleMatch) return frontmatterTitleMatch[1].trim()
+  const title = parseFrontmatter(content).frontmatter?.title
+  if (typeof title === "string" && title.trim()) return title.trim()
 
   const headingMatch = content.match(/^#\s+(.+)$/m)
   if (headingMatch) return headingMatch[1].trim()
@@ -143,9 +138,8 @@ function extractTitle(content: string, fileName: string): string {
 }
 
 function extractType(content: string): string {
-  const frontmatter = extractFrontmatterBlock(content)
-  const frontmatterTypeMatch = frontmatter.match(/^type:\s*["']?(.+?)["']?\s*$/m)
-  if (frontmatterTypeMatch) return frontmatterTypeMatch[1].trim().toLowerCase()
+  const type = parseFrontmatter(content).frontmatter?.type
+  if (typeof type === "string" && type.trim()) return type.trim().toLowerCase()
   return "other"
 }
 
