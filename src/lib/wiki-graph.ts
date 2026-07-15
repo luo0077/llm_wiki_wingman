@@ -126,8 +126,14 @@ function flattenMdFiles(nodes: FileNode[]): FileNode[] {
   return files
 }
 
+function extractFrontmatterBlock(content: string): string {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
+  return fmMatch ? fmMatch[1] : ""
+}
+
 function extractTitle(content: string, fileName: string): string {
-  const frontmatterTitleMatch = content.match(/^---\n[\s\S]*?^title:\s*["']?(.+?)["']?\s*$/m)
+  const frontmatter = extractFrontmatterBlock(content)
+  const frontmatterTitleMatch = frontmatter.match(/^title:\s*["']?(.+?)["']?\s*$/m)
   if (frontmatterTitleMatch) return frontmatterTitleMatch[1].trim()
 
   const headingMatch = content.match(/^#\s+(.+)$/m)
@@ -137,7 +143,8 @@ function extractTitle(content: string, fileName: string): string {
 }
 
 function extractType(content: string): string {
-  const frontmatterTypeMatch = content.match(/^---\n[\s\S]*?^type:\s*["']?(.+?)["']?\s*$/m)
+  const frontmatter = extractFrontmatterBlock(content)
+  const frontmatterTypeMatch = frontmatter.match(/^type:\s*["']?(.+?)["']?\s*$/m)
   if (frontmatterTypeMatch) return frontmatterTypeMatch[1].trim().toLowerCase()
   return "other"
 }
