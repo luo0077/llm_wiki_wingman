@@ -20,15 +20,21 @@ export function buildProjectPathIndexFromTree(tree: FileNode[]): ProjectPathInde
 
   function walk(nodes: FileNode[]) {
     for (const node of nodes) {
-      const entry: ProjectPathIndexEntry = {
-        name: node.name,
-        path: node.path,
-      }
-      byPath.set(node.path, entry)
-      if (!node.is_dir) {
-        const bucket = filesByName.get(node.name)
-        if (bucket) bucket.push(entry)
-        else filesByName.set(node.name, [entry])
+      // Callers may pass overlapping trees (e.g. the full project
+      // scan plus a hidden `raw/sources` rescan share the visible
+      // source files). Index each path once so `filesByName` buckets
+      // don't accumulate duplicate entries.
+      if (!byPath.has(node.path)) {
+        const entry: ProjectPathIndexEntry = {
+          name: node.name,
+          path: node.path,
+        }
+        byPath.set(node.path, entry)
+        if (!node.is_dir) {
+          const bucket = filesByName.get(node.name)
+          if (bucket) bucket.push(entry)
+          else filesByName.set(node.name, [entry])
+        }
       }
       if (node.is_dir && node.children) walk(node.children)
     }
