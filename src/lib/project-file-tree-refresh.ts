@@ -1,6 +1,7 @@
 import { listDirectory } from "@/commands/fs"
 import { useWikiStore } from "@/stores/wiki-store"
 import { normalizePath } from "@/lib/path-utils"
+import { filterRawSourceTree } from "@/lib/source-filter"
 import type { FileNode } from "@/types/wiki"
 
 export interface RefreshProjectFileTreeOptions {
@@ -98,7 +99,7 @@ export async function refreshProjectFileTree(
         if (!isStillCurrentProject(currentProjectId, normalizedProjectPath)) return
         useWikiStore
           .getState()
-          .setProjectPathIndexFromTree([...fullTree, ...rawSourcesTree])
+          .setProjectPathIndexFromTree([...fullTree, ...filterRawSourceTree(rawSourcesTree)])
       })
       .catch((err) => {
         console.error("Failed to refresh project path index:", err)

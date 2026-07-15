@@ -98,6 +98,11 @@ describe("refreshProjectFileTree", () => {
             path: "/tmp/project/raw/sources/.claude/memory.md",
             is_dir: false,
           },
+          {
+            name: "settings.json",
+            path: "/tmp/project/raw/sources/.claude/settings.json",
+            is_dir: false,
+          },
         ],
       },
     ]
@@ -118,6 +123,7 @@ describe("refreshProjectFileTree", () => {
     const index = useWikiStore.getState().projectPathIndex
     expect(index.byPath.has("/tmp/project/wiki/entities/alpha.md")).toBe(true)
     expect(index.byPath.has("/tmp/project/raw/sources/.claude/memory.md")).toBe(true)
+    expect(index.byPath.has("/tmp/project/raw/sources/.claude/settings.json")).toBe(false)
   })
 
   it("does not write stale results after the active project changes", async () => {
