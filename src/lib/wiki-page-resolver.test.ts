@@ -5,6 +5,7 @@ import {
   createEmptyProjectPathIndex,
   findInTreeByName,
   resolveRelatedSlug,
+  resolveSourceReference,
   resolveSourceName,
   unwrapWikilink,
 } from "./wiki-page-resolver"
@@ -304,5 +305,51 @@ describe("resolveSourceName", () => {
     expect(resolveSourceName(dotIndex, ".claude/projects/MEMORY.md", SOURCES)).toBe(
       `${SOURCES}/.claude/projects/MEMORY.md`,
     )
+  })
+})
+
+describe("resolveSourceReference", () => {
+  it("treats HTTP and HTTPS URLs as external sources", () => {
+    expect(
+      resolveSourceReference(
+        INDEX,
+        "https://developer.apple.com/videos/play/wwdc2025/230/",
+        SOURCES,
+      ),
+    ).toEqual({
+      kind: "external",
+      url: "https://developer.apple.com/videos/play/wwdc2025/230/",
+    })
+    expect(
+      resolveSourceReference(INDEX, "http://example.com/source", SOURCES),
+    ).toEqual({
+      kind: "external",
+      url: "http://example.com/source",
+    })
+  })
+
+  it("keeps existing local and missing source behavior", () => {
+    expect(resolveSourceReference(INDEX, "report.pdf", SOURCES)).toEqual({
+      kind: "local",
+      path: `${SOURCES}/report.pdf`,
+    })
+    expect(resolveSourceReference(INDEX, "ghost.pdf", SOURCES)).toEqual({
+      kind: "missing",
+    })
+  })
+
+  it("recognizes external URLs before local source roots are available", () => {
+    expect(
+      resolveSourceReference(INDEX, "https://example.com/source", null),
+    ).toEqual({
+      kind: "external",
+      url: "https://example.com/source",
+    })
+  })
+
+  it("does not classify non-HTTP URL-like values as external sources", () => {
+    expect(resolveSourceReference(INDEX, "javascript:alert(1)", SOURCES)).toEqual({
+      kind: "missing",
+    })
   })
 })
