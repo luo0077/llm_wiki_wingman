@@ -137,7 +137,7 @@ describe("runSemanticLint — missing-page false positives (#537)", () => {
       "维特根斯坦在概念页中被引用但未建立独立实体页。",
       "PAGES: 概念页.md",
       "---END LINT---",
-      "---LINT: missing-page | warning | 阿德勒实体页缺失---", // name + suffix, page exists
+      "---LINT: missing-page | warning | 缺失页面：阿德勒---", // standard prefix, page exists
       "阿德勒被引用但缺少页面。",
       "PAGES: 概念页.md",
       "---END LINT---",
@@ -157,6 +157,32 @@ describe("runSemanticLint — missing-page false positives (#537)", () => {
     // The two existing-entity false positives are filtered; only 尼采 remains.
     expect(missingPages).toHaveLength(1)
     expect(missingPages[0].page).toBe("尼采")
+  })
+
+  it("does not suppress an unrelated finding that merely contains an existing short title", async () => {
+    const pages = [
+      makeFileNode("AI.md", "---\ntitle: AI\n---\n# AI"),
+      makeFileNode("overview.md", "References [[FAIR data governance]]."),
+    ]
+    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
+    mockReadFile.mockImplementation(async (path) => {
+      const match = pages.find((p) => p.node.path === path)
+      return match?.content ?? ""
+    })
+    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
+      cb.onToken([
+        "---LINT: missing-page | warning | FAIR data governance---",
+        "The concept has no dedicated page.",
+        "PAGES: overview.md",
+        "---END LINT---",
+      ].join("\n"))
+      cb.onDone()
+    })
+
+    const results = await runSemanticLint("/project", fakeLlmConfig())
+
+    expect(results).toHaveLength(1)
+    expect(results[0].page).toBe("FAIR data governance")
   })
 })
 

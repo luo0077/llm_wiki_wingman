@@ -5,6 +5,7 @@ import type { FileNode } from "@/types/wiki"
 import { useActivityStore } from "@/stores/activity-store"
 import { getFileName, getRelativePath, normalizePath } from "@/lib/path-utils"
 import { buildLanguageDirective } from "@/lib/output-language"
+import { normalizeReviewTitle } from "@/lib/review-utils"
 
 export interface LintResult {
   type: "orphan" | "broken-link" | "no-outlinks" | "semantic"
@@ -67,16 +68,15 @@ function normalizeLinkTarget(target: string): string {
  * and compatibility forms so CJK / full-width variants compare equal.
  */
 function normalizeForExistence(s: string): string {
-  return s.normalize("NFKC").trim().toLowerCase()
+  return normalizeReviewTitle(s).normalize("NFKC").trim().toLowerCase()
 }
 
 /**
  * Decide whether an LLM `missing-page` finding actually refers to a page that
  * already exists. The LLM does not reliably cross-reference the file list, so it
- * flags entities whose page is already present — especially in non-English wikis
- * where its free-form titles ("维特根斯坦", "阿德勒实体页缺失", "缺失页面：X") don't
- * match a fixed prefix. Drop the finding when a known page name matches exactly
- * or appears within the finding title (guarded by length to avoid over-matching).
+ * flags entities whose page is already present. Only exact normalized names are
+ * accepted here. Substring matching is unsafe because short, valid page titles
+ * can also be ordinary words inside an unrelated missing-page finding.
  */
 function missingPageAlreadyExists(
   llmTitle: string,
@@ -84,11 +84,7 @@ function missingPageAlreadyExists(
 ): boolean {
   const norm = normalizeForExistence(llmTitle)
   if (!norm) return false
-  if (existingPageNames.has(norm)) return true
-  for (const name of existingPageNames) {
-    if (name.length >= 2 && norm.includes(name)) return true
-  }
-  return false
+  return existingPageNames.has(norm)
 }
 
 function extractTitle(content: string, fallbackPath: string): string {
@@ -406,6 +402,7 @@ export async function runSemanticLint(
     "- stale: information that appears outdated or superseded",
     "- missing-page: an important concept is heavily referenced but has no dedicated page",
     "- suggestion: a question or source worth adding to the wiki",
+    "For missing-page findings, Short title must be only the exact missing concept or entity name, without explanatory prefixes or suffixes.",
     "",
     "Severities:",
     "- warning: should be addressed",
