@@ -173,6 +173,7 @@ export function FrontmatterPanel({ data }: FrontmatterPanelProps) {
                   key={source}
                   name={label}
                   status={resolution.kind}
+                  externalUrl={resolution.kind === "external" ? resolution.url : undefined}
                   onClick={onClick}
                 />
               )
@@ -238,25 +239,27 @@ export function FrontmatterPanel({ data }: FrontmatterPanelProps) {
 function SourceCard({
   name,
   status,
+  externalUrl,
   onClick,
 }: {
   name: string
   status: SourceReferenceResolution["kind"]
+  externalUrl?: string
   onClick?: () => void
 }) {
   const isMissing = status === "missing"
   const Icon = status === "external" ? ArrowUpRight : iconForSource(name)
+  const title = status === "external"
+    ? `Open external source: ${externalUrl}`
+    : status === "local"
+      ? `Open ${name}`
+      : `Source not found in raw/sources/: ${name}`
   return (
     <button
       type="button"
       onClick={onClick}
-      title={
-        status === "external"
-          ? `Open external source ${name}`
-          : status === "local"
-            ? `Open ${name}`
-            : `Source not found in raw/sources/: ${name}`
-      }
+      title={title}
+      aria-label={title}
       className={`group flex min-w-0 max-w-[200px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors ${
         isMissing
           ? "border-dashed border-border/50 bg-muted/20 text-muted-foreground/70 cursor-default"

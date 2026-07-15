@@ -351,5 +351,18 @@ describe("resolveSourceReference", () => {
     expect(resolveSourceReference(INDEX, "javascript:alert(1)", SOURCES)).toEqual({
       kind: "missing",
     })
+    expect(resolveSourceReference(INDEX, "https://user:secret@example.com/file", SOURCES)).toEqual({
+      kind: "missing",
+    })
+    expect(resolveSourceReference(INDEX, "https://example.com/file\nname", SOURCES)).toEqual({
+      kind: "missing",
+    })
+  })
+
+  it("normalizes external URLs before exposing them to the opener", () => {
+    expect(resolveSourceReference(INDEX, "https://example.com", SOURCES)).toEqual({
+      kind: "external",
+      url: "https://example.com/",
+    })
   })
 })

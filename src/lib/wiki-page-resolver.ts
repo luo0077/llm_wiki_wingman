@@ -72,7 +72,8 @@ export function resolveSourceReference(
   sourcesRoot: string | null,
 ): SourceReferenceResolution {
   const trimmedRef = ref.trim()
-  if (isHttpUrl(trimmedRef)) return { kind: "external", url: trimmedRef }
+  const externalUrl = normalizeHttpUrl(trimmedRef)
+  if (externalUrl) return { kind: "external", url: externalUrl }
   if (!sourcesRoot) return { kind: "missing" }
 
   const path = resolveSourceName(index, trimmedRef, sourcesRoot)
@@ -185,11 +186,14 @@ function findInTreeByPath(index: ProjectPathIndex, targetPath: string): string |
   return found?.path ?? null
 }
 
-function isHttpUrl(ref: string): boolean {
+function normalizeHttpUrl(ref: string): string | null {
+  if (/[\u0000-\u001f\u007f]/u.test(ref)) return null
   try {
     const url = new URL(ref)
-    return url.protocol === "http:" || url.protocol === "https:"
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null
+    if (!url.hostname || url.username || url.password) return null
+    return url.href
   } catch {
-    return false
+    return null
   }
 }
