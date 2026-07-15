@@ -35,6 +35,16 @@ describe("sanitizeIngestedFileContent", () => {
     expect(sanitizeIngestedFileContent(input)).toBe("---\ntype: x\n---\n\n# Body")
   })
 
+  it("strips a frontmatter fence after leading blank lines with a case-insensitive label", () => {
+    const input = "\n  \n```YAML\n---\ntype: x\n---\n```\n# Body"
+    expect(sanitizeIngestedFileContent(input)).toBe("---\ntype: x\n---\n# Body")
+  })
+
+  it("strips a CRLF fence around empty frontmatter", () => {
+    const input = "```yaml\r\n---\r\n---\r\n```\r\n\r\n# Body"
+    expect(sanitizeIngestedFileContent(input)).toBe("---\r\n---\r\n\r\n# Body")
+  })
+
   it("does NOT strip a non-fence-wrapped document containing a fenced code block in the body", () => {
     const input =
       "---\ntype: x\n---\n\n# Heading\n\n```js\nconsole.log('hi')\n```\n\nmore body"

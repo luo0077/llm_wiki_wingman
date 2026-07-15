@@ -90,7 +90,9 @@ export function sanitizeIngestedFileContent(content: string): string {
 
 /** Top-level fence wrapper. Removes the open + matching close fence lines. */
 function stripOuterCodeFence(content: string): string {
-  const open = content.match(/^[ \t]*```(?:yaml|md|markdown)?[ \t]*\r?\n/)
+  const open = content.match(
+    /^(?:\uFEFF)?(?:[ \t]*\r?\n)*[ \t]*```(?:yaml|md|markdown)?[ \t]*\r?\n/i,
+  )
   if (!open) return content
   const afterOpen = content.slice(open[0].length)
 
@@ -103,7 +105,7 @@ function stripOuterCodeFence(content: string): string {
   // continue with an unfenced Markdown body. Only strip this shape when
   // the fenced section is exactly a complete `---` frontmatter block.
   const frontmatterOnly = afterOpen.match(
-    /^(---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n)[ \t]*```[ \t]*(?:\r?\n|$)/,
+    /^(---[ \t]*\r?\n[\s\S]*?^---[ \t]*\r?\n)[ \t]*```[ \t]*(?:\r?\n|$)/m,
   )
   if (!frontmatterOnly) return content
   return frontmatterOnly[1] + afterOpen.slice(frontmatterOnly[0].length)
