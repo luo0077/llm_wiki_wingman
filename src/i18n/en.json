@@ -167,8 +167,17 @@
     "importHint": "Import documents to start building your wiki",
     "importFiles": "Import Files",
     "importFolder": "Folder",
+    "importUrls": "URLs",
     "importSourceFiles": "Import Source Files",
     "importSourceFolder": "Import Source Folder",
+    "urlImport": {
+      "title": "Import web pages",
+      "description": "Enter one HTTP(S) URL per line. Each page is saved as a source and queued for ingest; failed URLs do not stop the rest of the batch.",
+      "placeholder": "https://example.com/article-one\nhttps://example.com/article-two",
+      "submit": "Import URLs",
+      "empty": "Enter at least one URL.",
+      "imported": "Imported"
+    },
     "refresh": "Refresh",
     "refreshFolder": "Refresh folder",
     "refreshingFolder": "Refreshing...",

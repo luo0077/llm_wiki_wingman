@@ -572,7 +572,7 @@ export async function cleanupDeletedWikiPages(
   }
 }
 
-async function getUniqueDestPath(dir: string, fileName: string): Promise<string> {
+export async function getUniqueDestPath(dir: string, fileName: string): Promise<string> {
   const basePath = `${dir}/${fileName}`
 
   if (!(await fileExists(basePath))) {

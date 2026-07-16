@@ -167,8 +167,17 @@
     "importHint": "导入文档，开始构建你的 Wiki",
     "importFiles": "导入文件",
     "importFolder": "文件夹",
+    "importUrls": "网址",
     "importSourceFiles": "导入源文件",
     "importSourceFolder": "导入源文件夹",
+    "urlImport": {
+      "title": "导入网页",
+      "description": "每行输入一个 HTTP(S) 网址。网页会保存为原始资料并进入提取队列；单个网址失败不会中断整批任务。",
+      "placeholder": "https://example.com/article-one\nhttps://example.com/article-two",
+      "submit": "导入网址",
+      "empty": "请至少输入一个网址。",
+      "imported": "已导入"
+    },
     "refresh": "刷新",
     "refreshFolder": "刷新文件夹",
     "refreshingFolder": "刷新中...",
