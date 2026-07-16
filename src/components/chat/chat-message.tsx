@@ -22,6 +22,7 @@ import { convertLatexToUnicode } from "@/lib/latex-to-unicode"
 import { normalizePath, getFileName, isAbsolutePath } from "@/lib/path-utils"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
+import { getTaskLlmConfig } from "@/lib/llm-task-routing"
 import { messageImageToDataUrl } from "@/lib/chat-image-utils"
 import { resolveMarkdownImageSrc } from "@/lib/markdown-image-resolver"
 import { transformImageEmbeds } from "@/lib/wikilink-transform"
@@ -612,7 +613,7 @@ function SaveToWikiButton({ content, visible }: { content: string; visible: bool
       setTimeout(() => setSaved(false), 2000)
 
       // Full auto-ingest: extract entities, concepts, cross-references from saved content
-      const llmConfig = useWikiStore.getState().llmConfig
+      const llmConfig = getTaskLlmConfig("ingest")
       if (hasUsableLlm(llmConfig)) {
         const { autoIngest } = await import("@/lib/ingest")
         autoIngest(pp, filePath, llmConfig).catch((err) =>

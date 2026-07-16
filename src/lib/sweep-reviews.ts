@@ -19,6 +19,7 @@ import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { normalizeReviewTitle } from "@/lib/review-utils"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
+import { getTaskLlmConfig } from "@/lib/llm-task-routing"
 import { parseFrontmatter } from "@/lib/frontmatter"
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -196,7 +197,7 @@ async function judgeBatch(
 ): Promise<Set<string>> {
   if (batch.length === 0 || signal?.aborted) return new Set()
 
-  const llmConfig = useWikiStore.getState().llmConfig
+  const llmConfig = getTaskLlmConfig("ingest")
   if (!hasUsableLlm(llmConfig)) return new Set()
 
   const pages = index.pages.slice(0, MAX_PAGES_IN_PROMPT)

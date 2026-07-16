@@ -1,6 +1,6 @@
 import { load } from "@tauri-apps/plugin-store"
 import type { WikiProject } from "@/types/wiki"
-import type { ApiConfig, GeneralConfig, LlmConfig, SearchApiConfig, EmbeddingConfig, MineruConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, ScheduledImportConfig, SourceWatchConfig } from "@/stores/wiki-store"
+import type { ApiConfig, GeneralConfig, LlmConfig, SearchApiConfig, EmbeddingConfig, MineruConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, ScheduledImportConfig, SourceWatchConfig, TaskModelRoutingConfig } from "@/stores/wiki-store"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 import { normalizePath } from "@/lib/path-utils"
 import { DEFAULT_ZOOM_LEVEL, clampZoomLevel } from "@/stores/zoom-store"
@@ -44,6 +44,7 @@ export async function addToRecentProjects(
 const LLM_CONFIG_KEY = "llmConfig"
 const PROVIDER_CONFIGS_KEY = "providerConfigs"
 const ACTIVE_PRESET_KEY = "activePresetId"
+const TASK_MODEL_ROUTING_KEY = "taskModelRouting"
 
 export async function saveLlmConfig(config: LlmConfig): Promise<void> {
   const store = await getStore()
@@ -73,6 +74,21 @@ export async function saveActivePresetId(id: string | null): Promise<void> {
 export async function loadActivePresetId(): Promise<string | null> {
   const store = await getStore()
   return (await store.get<string | null>(ACTIVE_PRESET_KEY)) ?? null
+}
+
+export async function saveTaskModelRouting(config: TaskModelRoutingConfig): Promise<void> {
+  const store = await getStore()
+  await store.set(TASK_MODEL_ROUTING_KEY, config)
+}
+
+export async function loadTaskModelRouting(): Promise<TaskModelRoutingConfig | null> {
+  const store = await getStore()
+  const saved = await store.get<Partial<TaskModelRoutingConfig>>(TASK_MODEL_ROUTING_KEY)
+  if (!saved) return null
+  return {
+    chatPresetId: typeof saved.chatPresetId === "string" ? saved.chatPresetId : null,
+    ingestPresetId: typeof saved.ingestPresetId === "string" ? saved.ingestPresetId : null,
+  }
 }
 
 const SEARCH_API_KEY = "searchApiConfig"

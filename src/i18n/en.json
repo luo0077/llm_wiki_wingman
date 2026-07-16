@@ -456,6 +456,12 @@
       "llm": {
         "title": "LLM Models",
         "description": "One row per vendor. Toggling one on automatically turns off the others. Changes save instantly; each vendor's API key is stored independently so switching doesn't lose data.",
+        "taskRouting": {
+          "chat": "Chat model",
+          "ingest": "Ingest model",
+          "activeDefault": "Use active model",
+          "hint": "Choose separate models for interactive chat and document ingest. The active model remains the fallback."
+        },
         "expand": "Expand config",
         "collapse": "Collapse",
         "toggleOff": "Click to deactivate",

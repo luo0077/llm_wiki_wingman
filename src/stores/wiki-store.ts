@@ -323,6 +323,13 @@ export interface ProviderOverride {
 
 export type ProviderConfigs = Record<string, ProviderOverride>
 
+export interface TaskModelRoutingConfig {
+  /** Null keeps chat on the globally active provider preset. */
+  chatPresetId: string | null
+  /** Null keeps ingest on the globally active provider preset. */
+  ingestPresetId: string | null
+}
+
 export interface ExternalPreview {
   title: string
   path: string
@@ -372,6 +379,7 @@ interface WikiState {
   providerConfigs: ProviderConfigs
   /** Which preset is currently active. `null` = no LLM configured. */
   activePresetId: string | null
+  taskModelRouting: TaskModelRoutingConfig
   searchApiConfig: SearchApiConfig
   embeddingConfig: EmbeddingConfig
   multimodalConfig: MultimodalConfig
@@ -399,6 +407,7 @@ interface WikiState {
   setLlmConfig: (config: LlmConfig) => void
   setProviderConfigs: (configs: ProviderConfigs) => void
   setActivePresetId: (id: string | null) => void
+  setTaskModelRouting: (config: TaskModelRoutingConfig) => void
   setSearchApiConfig: (config: SearchApiConfig) => void
   setEmbeddingConfig: (config: EmbeddingConfig) => void
   setMultimodalConfig: (config: MultimodalConfig) => void
@@ -438,6 +447,10 @@ export const useWikiStore = create<WikiState>((set) => ({
   },
   providerConfigs: {},
   activePresetId: null,
+  taskModelRouting: {
+    chatPresetId: null,
+    ingestPresetId: null,
+  },
 
   dataVersion: 0,
 
@@ -582,6 +595,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   setLlmConfig: (llmConfig) => set({ llmConfig }),
   setProviderConfigs: (providerConfigs) => set({ providerConfigs }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
+  setTaskModelRouting: (taskModelRouting) => set({ taskModelRouting }),
   setSearchApiConfig: (searchApiConfig) => set({ searchApiConfig }),
   setEmbeddingConfig: (embeddingConfig) => set({ embeddingConfig }),
   setMultimodalConfig: (multimodalConfig) => set({ multimodalConfig }),

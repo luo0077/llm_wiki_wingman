@@ -20,6 +20,8 @@ export function LlmProviderSection() {
   const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
   const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
   const llmConfig = useWikiStore((s) => s.llmConfig)
+  const taskModelRouting = useWikiStore((s) => s.taskModelRouting)
+  const setTaskModelRouting = useWikiStore((s) => s.setTaskModelRouting)
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [savedId, setSavedId] = useState<string | null>(null)
@@ -74,12 +76,46 @@ export function LlmProviderSection() {
     persist(providerConfigs, next).catch(() => {})
   }
 
+  async function updateTaskRouting(task: "chat" | "ingest", value: string) {
+    const next = {
+      ...taskModelRouting,
+      [task === "chat" ? "chatPresetId" : "ingestPresetId"]: value || null,
+    }
+    setTaskModelRouting(next)
+    const { saveTaskModelRouting } = await import("@/lib/project-store")
+    await saveTaskModelRouting(next)
+  }
+
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">{t("settings.sections.llm.title")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {t("settings.sections.llm.description")}
+        </p>
+      </div>
+
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-2">
+        <TaskModelSelect
+          id="chat-task-model"
+          label={t("settings.sections.llm.taskRouting.chat")}
+          value={taskModelRouting.chatPresetId ?? ""}
+          onChange={(value) => void updateTaskRouting("chat", value).catch((error) => {
+            console.error("Failed to save chat model routing:", error)
+          })}
+          fallbackLabel={t("settings.sections.llm.taskRouting.activeDefault")}
+        />
+        <TaskModelSelect
+          id="ingest-task-model"
+          label={t("settings.sections.llm.taskRouting.ingest")}
+          value={taskModelRouting.ingestPresetId ?? ""}
+          onChange={(value) => void updateTaskRouting("ingest", value).catch((error) => {
+            console.error("Failed to save ingest model routing:", error)
+          })}
+          fallbackLabel={t("settings.sections.llm.taskRouting.activeDefault")}
+        />
+        <p className="text-xs text-muted-foreground sm:col-span-2">
+          {t("settings.sections.llm.taskRouting.hint")}
         </p>
       </div>
 
@@ -98,6 +134,37 @@ export function LlmProviderSection() {
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+function TaskModelSelect({
+  id,
+  label,
+  value,
+  onChange,
+  fallbackLabel,
+}: {
+  id: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  fallbackLabel: string
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+      >
+        <option value="">{fallbackLabel}</option>
+        {LLM_PRESETS.map((preset) => (
+          <option key={preset.id} value={preset.id}>{preset.label}</option>
+        ))}
+      </select>
     </div>
   )
 }

@@ -13,6 +13,7 @@ import type { WikiProject, FileNode } from "@/types/wiki"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { enqueueBatch } from "@/lib/ingest-queue"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
+import { getTaskLlmConfig } from "@/lib/llm-task-routing"
 import { getFileName, getFileStem, getRelativePath, normalizePath } from "@/lib/path-utils"
 import {
   sourceIdentityForPath,
@@ -240,7 +241,7 @@ export async function enqueueSourceIngest(
   llmConfig: LlmConfig,
   options: { sourceRoot?: string; rootContext?: string } = {},
 ): Promise<string[]> {
-  if (!hasUsableLlm(llmConfig)) return []
+  if (!hasUsableLlm(getTaskLlmConfig("ingest", llmConfig))) return []
   const files = sourcePaths
     .filter((sourcePath) =>
       isIngestableSourcePath(sourcePath) &&
@@ -353,7 +354,7 @@ export async function importSourceFolder(
     naturalCompare(getRelativePath(a, destDir), getRelativePath(b, destDir)),
   )
 
-  if (hasUsableLlm(llmConfig)) {
+  if (hasUsableLlm(getTaskLlmConfig("ingest", llmConfig))) {
     await enqueueSourceIngest(project, naturallyOrderedFiles, llmConfig, {
       sourceRoot: destDir,
       rootContext: folderName,

@@ -1,0 +1,47 @@
+import { describe, expect, it } from "vitest"
+import { resolveTaskLlmConfig } from "./llm-task-routing"
+import type { LlmConfig } from "@/stores/wiki-store"
+
+const fallback: LlmConfig = {
+  provider: "openai",
+  apiKey: "global-key",
+  model: "global-model",
+  ollamaUrl: "http://localhost:11434",
+  customEndpoint: "",
+  maxContextSize: 128000,
+}
+
+describe("resolveTaskLlmConfig", () => {
+  it("uses the active global config when no task override is selected", () => {
+    expect(resolveTaskLlmConfig("chat", fallback, {}, {
+      chatPresetId: null,
+      ingestPresetId: null,
+    })).toBe(fallback)
+  })
+
+  it("resolves chat and ingest from independent provider presets", () => {
+    const configs = {
+      openai: { apiKey: "chat-key", model: "gpt-4o-mini" },
+      anthropic: { apiKey: "ingest-key", model: "claude-sonnet-4-6" },
+    }
+    const routing = { chatPresetId: "openai", ingestPresetId: "anthropic" }
+
+    expect(resolveTaskLlmConfig("chat", fallback, configs, routing)).toMatchObject({
+      provider: "openai",
+      apiKey: "chat-key",
+      model: "gpt-4o-mini",
+    })
+    expect(resolveTaskLlmConfig("ingest", fallback, configs, routing)).toMatchObject({
+      provider: "anthropic",
+      apiKey: "ingest-key",
+      model: "claude-sonnet-4-6",
+    })
+  })
+
+  it("falls back when a persisted preset id no longer exists", () => {
+    expect(resolveTaskLlmConfig("ingest", fallback, {}, {
+      chatPresetId: null,
+      ingestPresetId: "removed-provider",
+    })).toBe(fallback)
+  })
+})
