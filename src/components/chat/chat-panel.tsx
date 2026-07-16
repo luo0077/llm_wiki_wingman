@@ -467,9 +467,10 @@ export function ChatPanel() {
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const taskModelRouting = useWikiStore((s) => s.taskModelRouting)
   const projectLlmOverride = useWikiStore((s) => s.projectLlmOverride)
+  const customLlmPresets = useWikiStore((s) => s.customLlmPresets)
   const llmConfig = useMemo(
-    () => resolveTaskLlmConfig("chat", baseLlmConfig, providerConfigs, taskModelRouting, projectLlmOverride),
-    [baseLlmConfig, providerConfigs, taskModelRouting, projectLlmOverride],
+    () => resolveTaskLlmConfig("chat", baseLlmConfig, providerConfigs, taskModelRouting, projectLlmOverride, customLlmPresets),
+    [baseLlmConfig, providerConfigs, taskModelRouting, projectLlmOverride, customLlmPresets],
   )
   const searchApiConfig = useWikiStore((s) => s.searchApiConfig)
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)

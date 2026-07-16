@@ -44,6 +44,23 @@ describe("resolveTaskLlmConfig", () => {
       ingestPresetId: "removed-provider",
     })).toBe(fallback)
   })
+
+  it("routes tasks through a user-defined custom provider", () => {
+    const custom = [{ id: "custom-team", label: "Team Gateway" }]
+    expect(resolveTaskLlmConfig(
+      "chat",
+      fallback,
+      { "custom-team": { apiKey: "team-key", model: "team-model", baseUrl: "https://gateway.example/v1" } },
+      { chatPresetId: "custom-team", ingestPresetId: null },
+      undefined,
+      custom,
+    )).toMatchObject({
+      provider: "custom",
+      apiKey: "team-key",
+      model: "team-model",
+      customEndpoint: "https://gateway.example/v1",
+    })
+  })
 })
 
 describe("resolveProjectLlmConfig", () => {
@@ -67,6 +84,20 @@ describe("resolveProjectLlmConfig", () => {
       provider: "anthropic",
       apiKey: "shared-secret",
       model: "project-sonnet",
+    })
+  })
+
+  it("supports a user-defined custom provider as a project override", () => {
+    expect(resolveProjectLlmConfig(
+      fallback,
+      { "custom-team": { apiKey: "secret", baseUrl: "https://team.example/v1" } },
+      { enabled: true, presetId: "custom-team", model: "project-model" },
+      [{ id: "custom-team", label: "Team" }],
+    )).toMatchObject({
+      provider: "custom",
+      apiKey: "secret",
+      model: "project-model",
+      customEndpoint: "https://team.example/v1",
     })
   })
 

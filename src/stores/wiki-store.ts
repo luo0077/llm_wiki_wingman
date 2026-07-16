@@ -323,6 +323,11 @@ export interface ProviderOverride {
 
 export type ProviderConfigs = Record<string, ProviderOverride>
 
+export interface CustomLlmPreset {
+  id: string
+  label: string
+}
+
 export interface TaskModelRoutingConfig {
   /** Null keeps chat on the globally active provider preset. */
   chatPresetId: string | null
@@ -393,6 +398,7 @@ interface WikiState {
   globalLlmConfig: LlmConfig
   /** Per-provider-preset stored overrides (API key, model, endpoint, …). */
   providerConfigs: ProviderConfigs
+  customLlmPresets: CustomLlmPreset[]
   /** Which preset is currently active. `null` = no LLM configured. */
   activePresetId: string | null
   taskModelRouting: TaskModelRoutingConfig
@@ -424,6 +430,7 @@ interface WikiState {
   setLlmConfig: (config: LlmConfig) => void
   setGlobalLlmConfig: (config: LlmConfig) => void
   setProviderConfigs: (configs: ProviderConfigs) => void
+  setCustomLlmPresets: (presets: CustomLlmPreset[]) => void
   setActivePresetId: (id: string | null) => void
   setTaskModelRouting: (config: TaskModelRoutingConfig) => void
   setProjectLlmOverride: (config: ProjectLlmOverride) => void
@@ -476,6 +483,7 @@ export const useWikiStore = create<WikiState>((set) => ({
     localCliIsolation: false,
   },
   providerConfigs: {},
+  customLlmPresets: [],
   activePresetId: null,
   taskModelRouting: {
     chatPresetId: null,
@@ -631,6 +639,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   setLlmConfig: (llmConfig) => set({ llmConfig }),
   setGlobalLlmConfig: (globalLlmConfig) => set({ globalLlmConfig }),
   setProviderConfigs: (providerConfigs) => set({ providerConfigs }),
+  setCustomLlmPresets: (customLlmPresets) => set({ customLlmPresets }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
   setTaskModelRouting: (taskModelRouting) => set({ taskModelRouting }),
   setProjectLlmOverride: (projectLlmOverride) => set({ projectLlmOverride }),

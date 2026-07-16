@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react"
-import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, XCircle, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type ReasoningConfig, type ReasoningMode } from "@/stores/wiki-store"
-import { LLM_PRESETS, type LlmPreset } from "../llm-presets"
+import { availableLlmPresets, findLlmPreset, type LlmPreset } from "../llm-presets"
 import { ContextSizeSelector } from "../context-size-selector"
 import { disabledLlmConfig, resolveConfig } from "../preset-resolver"
 import { normalizeEndpoint } from "@/lib/endpoint-normalizer"
@@ -18,6 +19,8 @@ export function LlmProviderSection() {
   const { t } = useTranslation()
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const setProviderConfigs = useWikiStore((s) => s.setProviderConfigs)
+  const customLlmPresets = useWikiStore((s) => s.customLlmPresets)
+  const setCustomLlmPresets = useWikiStore((s) => s.setCustomLlmPresets)
   const activePresetId = useWikiStore((s) => s.activePresetId)
   const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
   const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
@@ -31,6 +34,7 @@ export function LlmProviderSection() {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [savedId, setSavedId] = useState<string | null>(null)
+  const presets = useMemo(() => availableLlmPresets(customLlmPresets), [customLlmPresets])
 
   function toggleExpand(id: string) {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -43,12 +47,11 @@ export function LlmProviderSection() {
     await saveProviderConfigs(newConfigs)
     await saveActivePresetId(newActive)
     if (newActive) {
-      const preset = LLM_PRESETS.find((p) => p.id === newActive)
+      const preset = findLlmPreset(newActive, customLlmPresets)
       if (preset) {
         const resolved = resolveConfig(preset, newConfigs[newActive], globalLlmConfig)
         setGlobalLlmConfig(resolved)
-        const { resolveProjectLlmConfig } = await import("@/lib/llm-task-routing")
-        setLlmConfig(resolveProjectLlmConfig(resolved, newConfigs, projectLlmOverride))
+        setLlmConfig(resolveProjectLlmConfig(resolved, newConfigs, projectLlmOverride, customLlmPresets))
         await saveLlmConfig(resolved)
       }
     } else {
@@ -60,26 +63,24 @@ export function LlmProviderSection() {
       // so the cleared values here do not affect the user's saved settings.
       const cleared = disabledLlmConfig(globalLlmConfig)
       setGlobalLlmConfig(cleared)
-      const { resolveProjectLlmConfig } = await import("@/lib/llm-task-routing")
-      setLlmConfig(resolveProjectLlmConfig(cleared, newConfigs, projectLlmOverride))
+      setLlmConfig(resolveProjectLlmConfig(cleared, newConfigs, projectLlmOverride, customLlmPresets))
       await saveLlmConfig(cleared)
     }
   }
 
   function updateOverride(id: string, patch: ProviderOverride) {
-    const merged: ProviderOverride = { ...(providerConfigs[id] ?? {}), ...patch }
-    const next = { ...providerConfigs, [id]: merged }
+    const currentConfigs = useWikiStore.getState().providerConfigs
+    const merged: ProviderOverride = { ...(currentConfigs[id] ?? {}), ...patch }
+    const next = { ...currentConfigs, [id]: merged }
     setProviderConfigs(next)
     persist(next, activePresetId).catch(() => {})
     // If this preset is active, refresh the resolved LlmConfig live.
     if (id === activePresetId) {
-      const preset = LLM_PRESETS.find((p) => p.id === id)
+      const preset = findLlmPreset(id, customLlmPresets)
       if (preset) {
         const resolved = resolveConfig(preset, merged, globalLlmConfig)
         setGlobalLlmConfig(resolved)
-        import("@/lib/llm-task-routing").then(({ resolveProjectLlmConfig }) => {
-          setLlmConfig(resolveProjectLlmConfig(resolved, next, projectLlmOverride))
-        }).catch(() => {})
+        setLlmConfig(resolveProjectLlmConfig(resolved, next, projectLlmOverride, customLlmPresets))
       }
     }
     setSavedId(id)
@@ -87,9 +88,10 @@ export function LlmProviderSection() {
   }
 
   function toggleActive(id: string) {
-    const next = id === activePresetId ? null : id
+    const state = useWikiStore.getState()
+    const next = id === state.activePresetId ? null : id
     setActivePresetId(next)
-    persist(providerConfigs, next).catch(() => {})
+    persist(state.providerConfigs, next).catch(() => {})
   }
 
   async function updateTaskRouting(task: "chat" | "ingest", value: string) {
@@ -102,14 +104,69 @@ export function LlmProviderSection() {
     await saveTaskModelRouting(next)
   }
 
+  async function addCustomPreset() {
+    const current = useWikiStore.getState().customLlmPresets
+    if (current.length >= 50) return
+    const id = `custom-${crypto.randomUUID()}`
+    const next = [...current, {
+      id,
+      label: t("settings.sections.llm.customProfiles.defaultName", {
+        number: current.length + 1,
+      }),
+    }]
+    setCustomLlmPresets(next)
+    setExpanded((current) => ({ ...current, [id]: true }))
+    const { saveCustomLlmPresets } = await import("@/lib/project-store")
+    await saveCustomLlmPresets(next)
+  }
+
+  async function renameCustomPreset(id: string, label: string) {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    const next = useWikiStore.getState().customLlmPresets
+      .map((preset) => preset.id === id ? { ...preset, label: trimmed.slice(0, 80) } : preset)
+    setCustomLlmPresets(next)
+    const { saveCustomLlmPresets } = await import("@/lib/project-store")
+    await saveCustomLlmPresets(next)
+  }
+
+  async function deleteCustomPreset(id: string) {
+    const state = useWikiStore.getState()
+    if (state.activePresetId === id) return
+    const nextPresets = state.customLlmPresets.filter((preset) => preset.id !== id)
+    const { [id]: _removed, ...nextConfigs } = state.providerConfigs
+    const nextRouting = {
+      chatPresetId: state.taskModelRouting.chatPresetId === id ? null : state.taskModelRouting.chatPresetId,
+      ingestPresetId: state.taskModelRouting.ingestPresetId === id ? null : state.taskModelRouting.ingestPresetId,
+    }
+    setCustomLlmPresets(nextPresets)
+    setProviderConfigs(nextConfigs)
+    setTaskModelRouting(nextRouting)
+    const { saveCustomLlmPresets, saveProviderConfigs, saveTaskModelRouting } = await import("@/lib/project-store")
+    await Promise.all([
+      saveCustomLlmPresets(nextPresets),
+      saveProviderConfigs(nextConfigs),
+      saveTaskModelRouting(nextRouting),
+    ])
+    if (project && state.projectLlmOverride.presetId === id) {
+      await updateProjectOverride({ enabled: false, presetId: null, model: "" })
+    }
+  }
+
   async function updateProjectOverride(patch: Partial<typeof projectLlmOverride>) {
     if (!project) return
     // Read the latest snapshot synchronously. Multiple input events can arrive
     // before React re-renders this closure; using the captured value would
     // discard fields changed by the preceding event.
-    const current = useWikiStore.getState().projectLlmOverride
+    const state = useWikiStore.getState()
+    const current = state.projectLlmOverride
     const draft = { ...current, ...patch }
-    const resolved = resolveProjectLlmConfig(globalLlmConfig, providerConfigs, draft)
+    const resolved = resolveProjectLlmConfig(
+      state.globalLlmConfig,
+      state.providerConfigs,
+      draft,
+      state.customLlmPresets,
+    )
     const next = { ...draft, profile: draft.enabled ? projectLlmProfile(resolved) : undefined }
     setProjectLlmOverride(next)
     setLlmConfig(resolved)
@@ -147,6 +204,7 @@ export function LlmProviderSection() {
                   console.error("Failed to save project provider:", error)
                 })}
                 fallbackLabel={t("settings.sections.llm.projectOverride.selectProvider")}
+                presets={presets}
               />
               <div className="space-y-1.5">
                 <Label htmlFor="project-llm-model">{t("settings.sections.llm.projectOverride.model")}</Label>
@@ -176,6 +234,7 @@ export function LlmProviderSection() {
             console.error("Failed to save chat model routing:", error)
           })}
           fallbackLabel={t("settings.sections.llm.taskRouting.activeDefault")}
+          presets={presets}
         />
         <TaskModelSelect
           id="ingest-task-model"
@@ -185,6 +244,7 @@ export function LlmProviderSection() {
             console.error("Failed to save ingest model routing:", error)
           })}
           fallbackLabel={t("settings.sections.llm.taskRouting.activeDefault")}
+          presets={presets}
         />
         <p className="text-xs text-muted-foreground sm:col-span-2">
           {t("settings.sections.llm.taskRouting.hint")}
@@ -192,7 +252,18 @@ export function LlmProviderSection() {
       </div>
 
       <div className="space-y-2">
-        {LLM_PRESETS.map((preset) => (
+        <div className="flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void addCustomPreset()}
+            disabled={customLlmPresets.length >= 50}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            {t("settings.sections.llm.customProfiles.add")}
+          </Button>
+        </div>
+        {presets.map((preset) => (
           <PresetRow
             key={preset.id}
             preset={preset}
@@ -203,6 +274,9 @@ export function LlmProviderSection() {
             onToggleActive={() => toggleActive(preset.id)}
             onToggleExpand={() => toggleExpand(preset.id)}
             onChange={(patch) => updateOverride(preset.id, patch)}
+            isUserCustom={preset.id.startsWith("custom-")}
+            onRename={(label) => void renameCustomPreset(preset.id, label)}
+            onDelete={() => void deleteCustomPreset(preset.id)}
           />
         ))}
       </div>
@@ -216,12 +290,14 @@ function TaskModelSelect({
   value,
   onChange,
   fallbackLabel,
+  presets,
 }: {
   id: string
   label: string
   value: string
   onChange: (value: string) => void
   fallbackLabel: string
+  presets: LlmPreset[]
 }) {
   return (
     <div className="space-y-1.5">
@@ -233,7 +309,7 @@ function TaskModelSelect({
         className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
       >
         <option value="">{fallbackLabel}</option>
-        {LLM_PRESETS.map((preset) => (
+        {presets.map((preset) => (
           <option key={preset.id} value={preset.id}>{preset.label}</option>
         ))}
       </select>
@@ -250,6 +326,9 @@ interface PresetRowProps {
   onToggleActive: () => void
   onToggleExpand: () => void
   onChange: (patch: ProviderOverride) => void
+  isUserCustom: boolean
+  onRename: (label: string) => void
+  onDelete: () => void
 }
 
 type ProviderTestState =
@@ -266,6 +345,9 @@ function PresetRow({
   onToggleActive,
   onToggleExpand,
   onChange,
+  isUserCustom,
+  onRename,
+  onDelete,
 }: PresetRowProps) {
   const { t } = useTranslation()
   const ov = override ?? {}
@@ -381,6 +463,19 @@ function PresetRow({
       {/* Expanded config panel */}
       {isExpanded && (
         <div className="space-y-4 border-t bg-background/50 px-4 py-3">
+          {isUserCustom && (
+            <div className="space-y-2">
+              <Label>{t("settings.sections.llm.customProfiles.name")}</Label>
+              <Input
+                defaultValue={preset.label}
+                maxLength={80}
+                onBlur={(event) => {
+                  if (!event.target.value.trim()) event.target.value = preset.label
+                  else onRename(event.target.value)
+                }}
+              />
+            </div>
+          )}
           {preset.provider === "custom" && (
             <div className="space-y-2">
               <Label>{t("settings.sections.llm.apiMode")}</Label>
@@ -636,6 +731,14 @@ function PresetRow({
               </div>
             )}
           </div>
+          {isUserCustom && (
+            <div className="flex justify-end border-t pt-3">
+              <Button variant="outline" size="sm" onClick={onDelete} disabled={isActive}>
+                <Trash2 className="mr-1 h-4 w-4" />
+                {t("settings.sections.llm.customProfiles.delete")}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

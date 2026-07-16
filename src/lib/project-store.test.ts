@@ -79,3 +79,19 @@ describe("project-store zoom normalization", () => {
     expect(__projectStoreTest.normalizeZoomLevel("150")).toBe(1)
   })
 })
+
+describe("project-store custom LLM preset normalization", () => {
+  it("keeps valid unique presets and bounds labels", () => {
+    const longLabel = "x".repeat(100)
+    expect(__projectStoreTest.normalizeCustomLlmPresets([
+      { id: "custom-one", label: " Team Gateway " },
+      { id: "custom-one", label: "duplicate" },
+      { id: "custom-two", label: longLabel },
+      { id: "openai", label: "collision" },
+      { id: "custom-empty", label: " " },
+    ])).toEqual([
+      { id: "custom-one", label: "Team Gateway" },
+      { id: "custom-two", label: "x".repeat(80) },
+    ])
+  })
+})

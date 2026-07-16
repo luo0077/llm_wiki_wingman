@@ -464,20 +464,26 @@
       },
       "llm": {
         "title": "LLM Models",
-        "description": "One row per vendor. Toggling one on automatically turns off the others. Changes save instantly; each vendor's API key is stored independently so switching doesn't lose data.",
+        "description": "Configure built-in providers or add multiple custom endpoints. Activating one automatically deactivates the others, while every provider keeps its own credentials and model settings.",
         "taskRouting": {
           "chat": "Chat model",
           "ingest": "Ingest model",
           "activeDefault": "Use active model",
           "hint": "Choose separate models for interactive chat and document ingest. The active model remains the fallback."
         },
-        "projectOverride": {
+      "projectOverride": {
           "enabled": "Use a project-specific model",
           "provider": "Project provider",
           "selectProvider": "Select a provider",
           "model": "Project model",
           "modelPlaceholder": "Use the provider's configured model",
           "hint": "When enabled, this project uses the selected provider and model for both Chat and Ingest. Credentials remain in the global provider settings."
+        },
+        "customProfiles": {
+          "add": "Add custom provider",
+          "defaultName": "Custom provider {{number}}",
+          "name": "Provider name",
+          "delete": "Delete custom provider"
         },
         "expand": "Expand config",
         "collapse": "Collapse",

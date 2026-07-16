@@ -1,6 +1,6 @@
 import { load } from "@tauri-apps/plugin-store"
 import type { WikiProject } from "@/types/wiki"
-import type { ApiConfig, GeneralConfig, LlmConfig, SearchApiConfig, EmbeddingConfig, MineruConfig, MultimodalConfig, OutputLanguage, ProjectLlmOverride, ProviderConfigs, ProxyConfig, ScheduledImportConfig, SourceWatchConfig, TaskModelRoutingConfig } from "@/stores/wiki-store"
+import type { ApiConfig, CustomLlmPreset, GeneralConfig, LlmConfig, SearchApiConfig, EmbeddingConfig, MineruConfig, MultimodalConfig, OutputLanguage, ProjectLlmOverride, ProviderConfigs, ProxyConfig, ScheduledImportConfig, SourceWatchConfig, TaskModelRoutingConfig } from "@/stores/wiki-store"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 import { normalizePath } from "@/lib/path-utils"
 import { DEFAULT_ZOOM_LEVEL, clampZoomLevel } from "@/stores/zoom-store"
@@ -46,7 +46,9 @@ const PROVIDER_CONFIGS_KEY = "providerConfigs"
 const ACTIVE_PRESET_KEY = "activePresetId"
 const TASK_MODEL_ROUTING_KEY = "taskModelRouting"
 const PROJECT_LLM_OVERRIDES_KEY = "projectLlmOverrides"
+const CUSTOM_LLM_PRESETS_KEY = "customLlmPresets"
 let projectLlmOverrideWrite = Promise.resolve()
+let customLlmPresetWrite = Promise.resolve()
 
 export async function saveLlmConfig(config: LlmConfig): Promise<void> {
   const store = await getStore()
@@ -66,6 +68,38 @@ export async function saveProviderConfigs(configs: ProviderConfigs): Promise<voi
 export async function loadProviderConfigs(): Promise<ProviderConfigs | null> {
   const store = await getStore()
   return (await store.get<ProviderConfigs>(PROVIDER_CONFIGS_KEY)) ?? null
+}
+
+export async function saveCustomLlmPresets(presets: CustomLlmPreset[]): Promise<void> {
+  const normalized = normalizeCustomLlmPresets(presets)
+  const write = customLlmPresetWrite.then(async () => {
+    const store = await getStore()
+    await store.set(CUSTOM_LLM_PRESETS_KEY, normalized)
+  })
+  customLlmPresetWrite = write.catch(() => {})
+  await write
+}
+
+export async function loadCustomLlmPresets(): Promise<CustomLlmPreset[]> {
+  const store = await getStore()
+  return normalizeCustomLlmPresets(await store.get<unknown>(CUSTOM_LLM_PRESETS_KEY))
+}
+
+function normalizeCustomLlmPresets(value: unknown): CustomLlmPreset[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const normalized: CustomLlmPreset[] = []
+  for (const entry of value) {
+    if (normalized.length >= 50) break
+    const candidate = entry as Partial<CustomLlmPreset> | null
+    if (!candidate || typeof candidate !== "object") continue
+    if (typeof candidate.id !== "string" || !/^custom-[A-Za-z0-9-]{1,80}$/.test(candidate.id)) continue
+    const label = typeof candidate.label === "string" ? candidate.label.trim().slice(0, 80) : ""
+    if (!label || seen.has(candidate.id)) continue
+    seen.add(candidate.id)
+    normalized.push({ id: candidate.id, label })
+  }
+  return normalized
 }
 
 export async function saveActivePresetId(id: string | null): Promise<void> {
@@ -206,6 +240,7 @@ function normalizeZoomLevel(level: unknown): number {
 export const __projectStoreTest = {
   normalizeMineruConfig,
   normalizeZoomLevel,
+  normalizeCustomLlmPresets,
 }
 
 export async function saveMineruConfig(config: MineruConfig): Promise<void> {
