@@ -190,6 +190,19 @@ function mineruImageMimeType(path: string): string {
   }
 }
 
+function mineruExtensionForMimeType(mimeType: string): string | null {
+  switch (mimeType.trim().toLowerCase()) {
+    case "image/jpeg": return "jpg"
+    case "image/png": return "png"
+    case "image/gif": return "gif"
+    case "image/webp": return "webp"
+    case "image/bmp": return "bmp"
+    case "image/svg+xml": return "svg"
+    case "image/tiff": return "tiff"
+    default: return null
+  }
+}
+
 function safeMineruAssetSegment(segment: string): string {
   const decoded = (() => {
     try {
@@ -740,7 +753,11 @@ async function parseWithLocalMineru(
           if (!match) continue
           const sourceName = getFileName(normalizeMineruZipPath(rawName))
           if (!sourceName || !isMineruImagePath(sourceName)) continue
-          const extension = sourceName.split(".").pop()?.toLowerCase()
+          // The data URI describes the bytes actually written. The server's
+          // filename is untrusted lookup metadata and may carry a mismatched
+          // extension, which would break previews and downstream MIME handling.
+          const mimeType = match[1].toLowerCase()
+          const extension = mineruExtensionForMimeType(mimeType)
           if (!extension) continue
           // Server-provided names are untrusted and may collide or contain a
           // Windows reserved device name. Generate deterministic local names
@@ -751,7 +768,7 @@ async function parseWithLocalMineru(
           await writeFileBase64(absPath, match[2])
           savedImages.push({
             index: savedImages.length,
-            mimeType: match[1],
+            mimeType,
             page: null,
             width: 0,
             height: 0,

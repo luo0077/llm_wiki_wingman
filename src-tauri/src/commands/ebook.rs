@@ -16,6 +16,7 @@ const MAX_EBOOK_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_EPUB_ENTRIES: usize = 10_000;
 const MAX_EPUB_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_EPUB_COMPRESSION_RATIO: u64 = 200;
+const MAX_EPUB_CHAPTER_BYTES: usize = 16 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_BYTES: usize = 32 * 1024 * 1024;
 const MAX_CHAPTERS: usize = 10_000;
 
@@ -66,6 +67,13 @@ fn validate_epub_archive(path: &str) -> Result<(), String> {
                 entry.name()
             ));
         }
+        if is_epub_text_entry(entry.name()) && entry.size() > MAX_EPUB_CHAPTER_BYTES as u64 {
+            return Err(format!(
+                "EPUB text entry '{}' exceeds the {} MB safety limit",
+                entry.name(),
+                MAX_EPUB_CHAPTER_BYTES / 1024 / 1024
+            ));
+        }
         expanded = expanded.saturating_add(entry.size());
         if expanded > MAX_EPUB_EXPANDED_BYTES {
             return Err(format!(
@@ -85,6 +93,17 @@ fn validate_epub_archive(path: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn is_epub_text_entry(name: &str) -> bool {
+    matches!(
+        Path::new(name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("html" | "htm" | "xhtml" | "xml")
+    )
 }
 
 fn extract_epub(path: &str) -> Result<String, String> {
@@ -128,6 +147,13 @@ fn extract_epub(path: &str) -> Result<String, String> {
         };
         if !mime.contains("html") && !mime.contains("xml") {
             continue;
+        }
+        if bytes.len() > MAX_EPUB_CHAPTER_BYTES {
+            return Err(format!(
+                "EPUB chapter {} exceeds the {} MB safety limit",
+                index + 1,
+                MAX_EPUB_CHAPTER_BYTES / 1024 / 1024
+            ));
         }
         let text = html_to_text(&bytes)?;
         if text.trim().is_empty() {
@@ -346,5 +372,12 @@ mod tests {
         let sanitized = safe_inline_text(&value, 20);
         assert_eq!(sanitized, "Book Title xxxxxxxx");
         assert!(!sanitized.contains('\n'));
+    }
+
+    #[test]
+    fn identifies_epub_text_entries_case_insensitively() {
+        assert!(is_epub_text_entry("OEBPS/chapter.XHTML"));
+        assert!(is_epub_text_entry("META-INF/container.xml"));
+        assert!(!is_epub_text_entry("OEBPS/images/cover.png"));
     }
 }

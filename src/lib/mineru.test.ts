@@ -442,6 +442,35 @@ describe("parseWithMineru", () => {
     expect(form.get("return_images")).toBe("true")
   })
 
+  it("uses the data URI MIME type when the MinerU filename extension disagrees", async () => {
+    mockHttpFetch
+      .mockResolvedValueOnce(jsonResponse({ task_id: "task-1" }, { status: 202 }))
+      .mockResolvedValueOnce(jsonResponse({ status: "completed" }))
+      .mockResolvedValueOnce(jsonResponse({
+        results: {
+          doc: {
+            md_content: "![Chart](images/chart.jpg)",
+            images: { "chart.jpg": `data:image/png;base64,${btoa("png bytes")}` },
+          },
+        },
+      }))
+
+    const result = await parseWithMineruResult({
+      enabled: true,
+      backend: "local",
+      token: "",
+      modelVersion: "vlm",
+      localBackend: "hybrid-engine",
+    }, "/tmp/doc.pdf", undefined, undefined, undefined, {
+      projectPath: "/project",
+      sourceSummarySlug: "doc",
+    })
+
+    expect(result.markdown).toBe("![Chart](media/doc/mineru/images/image-1.png)")
+    expect(result.savedImages[0]?.mimeType).toBe("image/png")
+    expect(result.savedImages[0]?.relPath).toBe("media/doc/mineru/images/image-1.png")
+  })
+
   it("requires a model server URL for official HTTP-client backends", async () => {
     await expect(parseWithMineru({
       enabled: true,

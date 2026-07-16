@@ -92,6 +92,13 @@ describe("sanitizeIngestedFileContent", () => {
     )
   })
 
+  it("repairs a wikilink list without corrupting CRLF frontmatter", () => {
+    const input = "---\r\ntype: entity\r\nrelated: [[a]], [[b]]\r\n---\r\n# Body\r\n"
+    expect(sanitizeIngestedFileContent(input)).toBe(
+      "---\r\ntype: entity\r\nrelated: [\"[[a]]\", \"[[b]]\"]\r\n---\r\n# Body\r\n",
+    )
+  })
+
   it("doesn't touch a single `key: [[a]]` (not a list — leave the user's intent alone)", () => {
     const input = `---\nrelated: [[a]]\n---\nbody`
     // Single-element nested-array form is rare but legal YAML;

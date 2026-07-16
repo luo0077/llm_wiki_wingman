@@ -153,12 +153,12 @@ function addMissingOpeningFrontmatterFence(content: string): string {
  * outside the frontmatter block are left untouched.
  */
 function repairWikilinkListsInFrontmatter(content: string): string {
-  const fmRe = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(\r?\n|$)/
+  const fmRe = /^(---[ \t]*(\r?\n))([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))/
   const m = content.match(fmRe)
   if (!m) return content
 
-  const repairedPayload = m[1]
-    .split("\n")
+  const repairedPayload = m[3]
+    .split(/\r?\n/)
     .map((line) => {
       const lm = line.match(
         /^(\s*[A-Za-z_][\w-]*\s*:\s*)(\[\[[^\]]+\]\](?:\s*,\s*\[\[[^\]]+\]\])+)\s*$/,
@@ -172,13 +172,10 @@ function repairWikilinkListsInFrontmatter(content: string): string {
         .join(", ")
       return `${lm[1]}[${items}]`
     })
-    .join("\n")
+    .join(m[2])
 
-  // Replace ONLY the payload between fences; preserve the original
-  // fence lines and trailing newline shape.
-  return (
-    content.slice(0, m.index! + 4) + // up to and including "---\n"
-    repairedPayload +
-    content.slice(m.index! + 4 + m[1].length)
-  )
+  // Rebuild from captured delimiters instead of assuming the opening fence is
+  // four bytes. Windows CRLF makes `---\r\n` five bytes, and hard-coded offsets
+  // corrupt both the opening fence and the payload boundary.
+  return m[1] + repairedPayload + m[4] + content.slice(m[0].length)
 }
