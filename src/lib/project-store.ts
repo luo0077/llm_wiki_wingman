@@ -1,6 +1,6 @@
 import { load } from "@tauri-apps/plugin-store"
 import type { WikiProject } from "@/types/wiki"
-import type { ApiConfig, GeneralConfig, LlmConfig, SearchApiConfig, EmbeddingConfig, MineruConfig, MultimodalConfig, OutputLanguage, ProviderConfigs, ProxyConfig, ScheduledImportConfig, SourceWatchConfig, TaskModelRoutingConfig } from "@/stores/wiki-store"
+import type { ApiConfig, GeneralConfig, LlmConfig, SearchApiConfig, EmbeddingConfig, MineruConfig, MultimodalConfig, OutputLanguage, ProjectLlmOverride, ProviderConfigs, ProxyConfig, ScheduledImportConfig, SourceWatchConfig, TaskModelRoutingConfig } from "@/stores/wiki-store"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 import { normalizePath } from "@/lib/path-utils"
 import { DEFAULT_ZOOM_LEVEL, clampZoomLevel } from "@/stores/zoom-store"
@@ -45,6 +45,8 @@ const LLM_CONFIG_KEY = "llmConfig"
 const PROVIDER_CONFIGS_KEY = "providerConfigs"
 const ACTIVE_PRESET_KEY = "activePresetId"
 const TASK_MODEL_ROUTING_KEY = "taskModelRouting"
+const PROJECT_LLM_OVERRIDES_KEY = "projectLlmOverrides"
+let projectLlmOverrideWrite = Promise.resolve()
 
 export async function saveLlmConfig(config: LlmConfig): Promise<void> {
   const store = await getStore()
@@ -88,6 +90,34 @@ export async function loadTaskModelRouting(): Promise<TaskModelRoutingConfig | n
   return {
     chatPresetId: typeof saved.chatPresetId === "string" ? saved.chatPresetId : null,
     ingestPresetId: typeof saved.ingestPresetId === "string" ? saved.ingestPresetId : null,
+  }
+}
+
+export async function saveProjectLlmOverride(
+  projectId: string,
+  config: ProjectLlmOverride,
+): Promise<void> {
+  // Store updates are read-modify-write. Serialize them so rapid model input
+  // or concurrent project edits cannot let an older write overwrite a newer
+  // snapshot (or drop another project's entry).
+  const write = projectLlmOverrideWrite.then(async () => {
+    const store = await getStore()
+    const existing = (await store.get<Record<string, ProjectLlmOverride>>(PROJECT_LLM_OVERRIDES_KEY)) ?? {}
+    await store.set(PROJECT_LLM_OVERRIDES_KEY, { ...existing, [projectId]: config })
+  })
+  projectLlmOverrideWrite = write.catch(() => {})
+  await write
+}
+
+export async function loadProjectLlmOverride(projectId: string): Promise<ProjectLlmOverride> {
+  const store = await getStore()
+  const existing = await store.get<Record<string, Partial<ProjectLlmOverride>>>(PROJECT_LLM_OVERRIDES_KEY)
+  const saved = existing?.[projectId]
+  return {
+    enabled: saved?.enabled === true,
+    presetId: typeof saved?.presetId === "string" ? saved.presetId : null,
+    model: typeof saved?.model === "string" ? saved.model : "",
+    profile: saved?.profile,
   }
 }
 

@@ -1716,7 +1716,7 @@ fn handle_chat(app: &AppHandle, project_id: &str, body: &str) -> ApiResponse {
                 .collect();
         }
     }
-    let runtime_config = load_agent_runtime_config(app);
+    let runtime_config = load_agent_runtime_config(app, Some(&project.id));
     let runtime = agent::AgentRuntime::new(
         project.id.clone(),
         project.path.clone(),
@@ -1800,7 +1800,65 @@ struct AgentRuntimeConfig {
     anytxt: Option<agent::tools::AnyTxtConfig>,
 }
 
-fn load_agent_runtime_config(app: &AppHandle) -> AgentRuntimeConfig {
+fn project_llm_config(parsed: &Value, project_id: &str) -> Option<agent::provider::LlmConfig> {
+    let global = parsed.get("llmConfig").cloned();
+    let Some(project) = parsed
+        .get("projectLlmOverrides")
+        .and_then(|value| value.get(project_id))
+    else {
+        return global.and_then(|value| serde_json::from_value(value).ok());
+    };
+    if project.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return global.and_then(|value| serde_json::from_value(value).ok());
+    }
+
+    // The frontend persists a resolved, non-secret profile. Merge the current
+    // provider override here so credential rotation and endpoint edits apply to
+    // native API calls without duplicating API keys in every project record.
+    let mut profile = project.get("profile")?.clone();
+    let profile_object = profile.as_object_mut()?;
+    let preset_id = project.get("presetId").and_then(Value::as_str)?;
+    if let Some(provider) = parsed
+        .get("providerConfigs")
+        .and_then(|value| value.get(preset_id))
+        .and_then(Value::as_object)
+    {
+        for key in [
+            "apiKey",
+            "apiMode",
+            "azureApiVersion",
+            "maxContextSize",
+            "reasoning",
+        ] {
+            if let Some(value) = provider.get(key) {
+                profile_object.insert(key.to_string(), value.clone());
+            }
+        }
+        if project
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            if let Some(value) = provider.get("model") {
+                profile_object.insert("model".to_string(), value.clone());
+            }
+        }
+        if let Some(value) = provider.get("baseUrl") {
+            let endpoint_key =
+                if profile_object.get("provider").and_then(Value::as_str) == Some("ollama") {
+                    "ollamaUrl"
+                } else {
+                    "customEndpoint"
+                };
+            profile_object.insert(endpoint_key.to_string(), value.clone());
+        }
+    }
+    serde_json::from_value(profile).ok()
+}
+
+fn load_agent_runtime_config(app: &AppHandle, project_id: Option<&str>) -> AgentRuntimeConfig {
     let Some(parsed) = load_app_state(app) else {
         return AgentRuntimeConfig::default();
     };
@@ -1809,10 +1867,14 @@ fn load_agent_runtime_config(app: &AppHandle) -> AgentRuntimeConfig {
             .get("embeddingConfig")
             .cloned()
             .and_then(|value| serde_json::from_value(value).ok()),
-        llm: parsed
-            .get("llmConfig")
-            .cloned()
-            .and_then(|value| serde_json::from_value(value).ok()),
+        llm: project_id
+            .and_then(|id| project_llm_config(&parsed, id))
+            .or_else(|| {
+                parsed
+                    .get("llmConfig")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value(value).ok())
+            }),
         web_search: parsed
             .get("searchApiConfig")
             .cloned()
@@ -2716,5 +2778,44 @@ mod tests {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         assert!(!allow_lan_access_missing);
+    }
+
+    #[test]
+    fn project_llm_config_uses_profile_with_current_provider_credentials() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "providerConfigs": {
+                "deepseek": { "apiKey": "rotated", "model": "provider-model", "baseUrl": "https://new.example/v1", "apiMode": "chat_completions" }
+            },
+            "projectLlmOverrides": {
+                "project-a": {
+                    "enabled": true,
+                    "presetId": "deepseek",
+                    "model": "project-model",
+                    "profile": { "provider": "custom", "model": "project-model", "ollamaUrl": "", "customEndpoint": "https://old.example/v1", "maxContextSize": 64000, "apiMode": "chat_completions" }
+                }
+            }
+        });
+        let config = project_llm_config(&state, "project-a").expect("project config");
+        assert_eq!(config.provider, "custom");
+        assert_eq!(config.api_key, "rotated");
+        assert_eq!(config.model, "project-model");
+        assert_eq!(config.custom_endpoint, "https://new.example/v1");
+    }
+
+    #[test]
+    fn project_llm_config_falls_back_for_disabled_or_legacy_override() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "projectLlmOverrides": {
+                "disabled": { "enabled": false, "presetId": "anthropic", "model": "claude" },
+                "legacy": { "enabled": true, "presetId": "anthropic", "model": "claude" }
+            }
+        });
+        assert_eq!(
+            project_llm_config(&state, "disabled").unwrap().model,
+            "gpt-global"
+        );
+        assert!(project_llm_config(&state, "legacy").is_none());
     }
 }

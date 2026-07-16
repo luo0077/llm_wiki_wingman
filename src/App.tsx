@@ -9,7 +9,7 @@ import { useLintStore } from "@/stores/lint-store"
 import { useChatStore } from "@/stores/chat-store"
 import { BASE_FONT_SIZE_PX, useZoomStore } from "@/stores/zoom-store"
 import { openProject } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadLanguage, loadSearchApiConfig, loadEmbeddingConfig, loadMineruConfig, loadMultimodalConfig, loadOutputLanguage, loadProviderConfigs, loadActivePresetId, loadTaskModelRouting, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadApiConfig, loadGeneralConfig, loadZoomLevel } from "@/lib/project-store"
+import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadLanguage, loadSearchApiConfig, loadEmbeddingConfig, loadMineruConfig, loadMultimodalConfig, loadOutputLanguage, loadProviderConfigs, loadActivePresetId, loadTaskModelRouting, loadProjectLlmOverride, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadApiConfig, loadGeneralConfig, loadZoomLevel } from "@/lib/project-store"
 import { loadReviewItems, loadLintItems, loadChatHistory, loadChatPreferences } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
 import { startClipWatcher } from "@/lib/clip-watcher"
@@ -286,6 +286,7 @@ function App() {
         const savedConfig = await loadLlmConfig()
         if (savedConfig) {
           useWikiStore.getState().setLlmConfig(savedConfig)
+          useWikiStore.getState().setGlobalLlmConfig(savedConfig)
         }
         const savedProviderConfigs = await loadProviderConfigs()
         if (savedProviderConfigs) {
@@ -309,6 +310,7 @@ function App() {
             const override = (savedProviderConfigs ?? {})[savedActivePreset]
             const resolved = resolveConfig(preset, override, currentFallback)
             useWikiStore.getState().setLlmConfig(resolved)
+            useWikiStore.getState().setGlobalLlmConfig(resolved)
             const { saveLlmConfig } = await import("@/lib/project-store")
             await saveLlmConfig(resolved)
           }
@@ -414,6 +416,15 @@ function App() {
       await resetProjectState()
 
       setProject(proj)
+      const projectLlmOverride = await loadProjectLlmOverride(proj.id)
+      const llmState = useWikiStore.getState()
+      const { resolveProjectLlmConfig } = await import("@/lib/llm-task-routing")
+      llmState.setProjectLlmOverride(projectLlmOverride)
+      llmState.setLlmConfig(resolveProjectLlmConfig(
+        llmState.globalLlmConfig,
+        llmState.providerConfigs,
+        projectLlmOverride,
+      ))
       const projectOutputLang = await loadOutputLanguage(proj.id)
       useWikiStore.getState().setOutputLanguage(projectOutputLang ?? "auto")
       setSelectedFile(null)

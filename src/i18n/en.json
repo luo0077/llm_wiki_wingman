@@ -462,6 +462,14 @@
           "activeDefault": "Use active model",
           "hint": "Choose separate models for interactive chat and document ingest. The active model remains the fallback."
         },
+        "projectOverride": {
+          "enabled": "Use a project-specific model",
+          "provider": "Project provider",
+          "selectProvider": "Select a provider",
+          "model": "Project model",
+          "modelPlaceholder": "Use the provider's configured model",
+          "hint": "When enabled, this project uses the selected provider and model for both Chat and Ingest. Credentials remain in the global provider settings."
+        },
         "expand": "Expand config",
         "collapse": "Collapse",
         "toggleOff": "Click to deactivate",

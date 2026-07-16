@@ -462,6 +462,14 @@
           "activeDefault": "使用当前活跃模型",
           "hint": "可为交互聊天和文档摄取分别选择模型；未指定时继续使用当前活跃模型。"
         },
+        "projectOverride": {
+          "enabled": "为当前项目使用独立模型",
+          "provider": "项目 Provider",
+          "selectProvider": "选择 Provider",
+          "model": "项目模型",
+          "modelPlaceholder": "使用 Provider 已配置的模型",
+          "hint": "启用后，当前项目的 Chat 和 Ingest 都使用这里选择的 Provider 与模型；API Key 仍保存在全局 Provider 设置中。"
+        },
         "expand": "展开配置",
         "collapse": "收起",
         "toggleOff": "点击关闭",

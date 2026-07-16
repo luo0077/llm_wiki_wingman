@@ -2,12 +2,33 @@ import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
 import type {
   LlmConfig,
+  ProjectLlmOverride,
   ProviderConfigs,
   TaskModelRoutingConfig,
 } from "@/stores/wiki-store"
 import { useWikiStore } from "@/stores/wiki-store"
 
 export type LlmTaskKind = "chat" | "ingest"
+
+export function resolveProjectLlmConfig(
+  globalConfig: LlmConfig,
+  providerConfigs: ProviderConfigs,
+  projectOverride: ProjectLlmOverride,
+): LlmConfig {
+  if (!projectOverride.enabled || !projectOverride.presetId) return globalConfig
+  const preset = LLM_PRESETS.find((candidate) => candidate.id === projectOverride.presetId)
+  if (!preset) return globalConfig
+  const baseOverride = providerConfigs[projectOverride.presetId]
+  const override = projectOverride.model.trim()
+    ? { ...baseOverride, model: projectOverride.model.trim() }
+    : baseOverride
+  return resolveConfig(preset, override, globalConfig)
+}
+
+export function projectLlmProfile(config: LlmConfig): Omit<LlmConfig, "apiKey"> {
+  const { apiKey: _apiKey, ...profile } = config
+  return profile
+}
 
 /**
  * Resolve a task-specific provider from the current preset overrides.
@@ -20,7 +41,9 @@ export function resolveTaskLlmConfig(
   fallback: LlmConfig,
   providerConfigs: ProviderConfigs,
   routing: TaskModelRoutingConfig,
+  projectOverride?: ProjectLlmOverride,
 ): LlmConfig {
+  if (projectOverride?.enabled) return fallback
   const presetId = task === "chat" ? routing.chatPresetId : routing.ingestPresetId
   if (!presetId) return fallback
   const preset = LLM_PRESETS.find((candidate) => candidate.id === presetId)
@@ -36,5 +59,6 @@ export function getTaskLlmConfig(task: LlmTaskKind, fallback?: LlmConfig): LlmCo
     fallback ?? state.llmConfig,
     state.providerConfigs,
     state.taskModelRouting,
+    state.projectLlmOverride,
   )
 }

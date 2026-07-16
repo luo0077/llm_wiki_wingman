@@ -330,6 +330,20 @@ export interface TaskModelRoutingConfig {
   ingestPresetId: string | null
 }
 
+export interface ProjectLlmOverride {
+  enabled: boolean
+  presetId: string | null
+  /** Empty uses the selected preset/global provider model. */
+  model: string
+  /**
+   * Resolved provider metadata for native/API callers. The API key is
+   * deliberately omitted: Rust merges the current credential from
+   * providerConfigs[presetId], so rotating a key never requires rewriting
+   * every project override and credentials are not duplicated per project.
+   */
+  profile?: Omit<LlmConfig, "apiKey">
+}
+
 export interface ExternalPreview {
   title: string
   path: string
@@ -375,11 +389,14 @@ interface WikiState {
   pendingScrollImageSrc: string | null
   activeView: "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "review" | "skills" | "settings"
   llmConfig: LlmConfig
+  /** Persisted global/default config, kept separate while a project override is effective. */
+  globalLlmConfig: LlmConfig
   /** Per-provider-preset stored overrides (API key, model, endpoint, …). */
   providerConfigs: ProviderConfigs
   /** Which preset is currently active. `null` = no LLM configured. */
   activePresetId: string | null
   taskModelRouting: TaskModelRoutingConfig
+  projectLlmOverride: ProjectLlmOverride
   searchApiConfig: SearchApiConfig
   embeddingConfig: EmbeddingConfig
   multimodalConfig: MultimodalConfig
@@ -405,9 +422,11 @@ interface WikiState {
   setPendingScrollImageSrc: (src: string | null) => void
   setActiveView: (view: WikiState["activeView"]) => void
   setLlmConfig: (config: LlmConfig) => void
+  setGlobalLlmConfig: (config: LlmConfig) => void
   setProviderConfigs: (configs: ProviderConfigs) => void
   setActivePresetId: (id: string | null) => void
   setTaskModelRouting: (config: TaskModelRoutingConfig) => void
+  setProjectLlmOverride: (config: ProjectLlmOverride) => void
   setSearchApiConfig: (config: SearchApiConfig) => void
   setEmbeddingConfig: (config: EmbeddingConfig) => void
   setMultimodalConfig: (config: MultimodalConfig) => void
@@ -445,11 +464,28 @@ export const useWikiStore = create<WikiState>((set) => ({
     reasoning: { mode: "auto" },
     localCliIsolation: false,
   },
+  globalLlmConfig: {
+    provider: "openai",
+    apiKey: "",
+    maxContextSize: 204800,
+    model: "",
+    ollamaUrl: "http://localhost:11434",
+    customEndpoint: "",
+    azureApiVersion: "2024-10-21",
+    reasoning: { mode: "auto" },
+    localCliIsolation: false,
+  },
   providerConfigs: {},
   activePresetId: null,
   taskModelRouting: {
     chatPresetId: null,
     ingestPresetId: null,
+  },
+  projectLlmOverride: {
+    enabled: false,
+    presetId: null,
+    model: "",
+    profile: undefined,
   },
 
   dataVersion: 0,
@@ -593,9 +629,11 @@ export const useWikiStore = create<WikiState>((set) => ({
   graphUiState: createDefaultGraphUiState(),
 
   setLlmConfig: (llmConfig) => set({ llmConfig }),
+  setGlobalLlmConfig: (globalLlmConfig) => set({ globalLlmConfig }),
   setProviderConfigs: (providerConfigs) => set({ providerConfigs }),
   setActivePresetId: (activePresetId) => set({ activePresetId }),
   setTaskModelRouting: (taskModelRouting) => set({ taskModelRouting }),
+  setProjectLlmOverride: (projectLlmOverride) => set({ projectLlmOverride }),
   setSearchApiConfig: (searchApiConfig) => set({ searchApiConfig }),
   setEmbeddingConfig: (embeddingConfig) => set({ embeddingConfig }),
   setMultimodalConfig: (multimodalConfig) => set({ multimodalConfig }),
