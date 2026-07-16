@@ -60,6 +60,8 @@ export const INGESTABLE_SOURCE_EXTENSIONS = new Set([
   "xml",
   "yaml",
   "yml",
+  "epub",
+  "mobi",
 ])
 
 function flattenFiles(nodes: FileNode[]): FileNode[] {
@@ -264,6 +266,11 @@ export async function importSourceFiles(
   const pp = normalizePath(project.path)
   const importedPaths: string[] = []
   const cfg = normalizeSourceWatchConfig(sourceWatchConfig)
+  // Explicit file selection is user intent, so the watcher's allow-list must
+  // not silently reject a newly supported format from an older persisted
+  // configuration. Exclusions and the size ceiling still apply. Folder/watch
+  // imports continue to honor includeExtensions to prevent surprise ingestion.
+  const explicitImportConfig = { ...cfg, includeExtensions: [] }
   const maxBytes = cfg.maxFileSizeMb * 1024 * 1024
 
   for (const sourcePath of sourcePaths) {
@@ -271,7 +278,8 @@ export async function importSourceFiles(
     if (isSensitiveConfigSourceFile(sourcePath)) {
       continue
     }
-    let allowed = isPathAllowedBySourceWatch(sourcePath, cfg)
+    let allowed = isIngestableSourcePath(sourcePath)
+      && isPathAllowedBySourceWatch(sourcePath, explicitImportConfig)
     if (allowed) {
       try {
         allowed = await getFileSize(sourcePath) <= maxBytes

@@ -107,7 +107,7 @@ export function SourcesView() {
             "md", "mdx", "txt", "rtf", "pdf",
             "html", "htm", "xml",
             "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            "odt", "ods", "odp", "epub", "pages", "numbers", "key",
+            "odt", "ods", "odp", "epub", "mobi", "pages", "numbers", "key",
           ],
         },
         {

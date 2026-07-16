@@ -20,7 +20,8 @@ const MEDIA_EXTS: &[&str] = &[
     "mp4", "webm", "mov", "avi", "mkv", "flv", "wmv", "m4v", "mp3", "wav", "ogg", "flac", "aac",
     "m4a", "wma",
 ];
-const LEGACY_DOC_EXTS: &[&str] = &["ppt", "pages", "numbers", "key", "epub"];
+const EBOOK_EXTS: &[&str] = &["epub", "mobi"];
+const LEGACY_DOC_EXTS: &[&str] = &["ppt", "pages", "numbers", "key"];
 
 fn require_absolute_path(operation: &str, path: &str) -> Result<(), String> {
     if is_absolute_path_cross_platform(path) {
@@ -82,6 +83,7 @@ pub async fn read_file(path: String, extract_images: Option<bool>) -> Result<Str
             match ext.as_str() {
                 "pdf" => extract_pdf_text(&path, include_images),
                 e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e),
+                e if EBOOK_EXTS.contains(&e) => crate::commands::ebook::extract_ebook_text(&path, e),
                 e if IMAGE_EXTS.contains(&e) => {
                     let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                     Ok(format!("[Image: {} ({:.1} KB)]", p.file_name().unwrap_or_default().to_string_lossy(), size as f64 / 1024.0))
@@ -133,6 +135,9 @@ pub async fn preprocess_file(path: String) -> Result<String, String> {
             let text = match ext.as_str() {
                 "pdf" => extract_pdf_text(&path, false)?,
                 e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e)?,
+                e if EBOOK_EXTS.contains(&e) => {
+                    crate::commands::ebook::extract_ebook_text(&path, e)?
+                }
                 _ => return Ok("no preprocessing needed".to_string()),
             };
 
