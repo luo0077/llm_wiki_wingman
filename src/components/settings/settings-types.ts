@@ -32,6 +32,10 @@ export interface SettingsDraft {
   embeddingMaxChunkChars: number | undefined
   /** Overlap characters between adjacent chunks. Empty = default (200). */
   embeddingOverlapChunkChars: number | undefined
+  /** Maximum number of embedding requests in flight. */
+  embeddingConcurrency: number
+  /** Inputs per request for OpenAI-compatible batch endpoints. */
+  embeddingBatchSize: number
   /** Extra HTTP headers to send on every embedding request. Empty = none. */
   embeddingExtraHeaders: Record<string, string>
 

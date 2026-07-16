@@ -133,6 +133,10 @@ interface EmbeddingConfig {
    */
   maxChunkChars?: number
   overlapChunkChars?: number
+  /** Maximum embedding HTTP requests in flight. Defaults to 1 for compatibility. */
+  concurrency?: number
+  /** Texts per OpenAI-compatible embedding request. Defaults to 1. */
+  batchSize?: number
   /**
    * Extra HTTP headers to send with every embedding request, e.g.
    *   { "X-Model-Provider-Id": "siliconflow" }

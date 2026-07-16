@@ -647,6 +647,7 @@ pub fn run() {
             commands::project_maintenance::rebuild_wiki_index,
             commands::search::search_project,
             commands::search::embedding_fetch,
+            commands::search::embedding_fetch_batch,
             commands::search::get_page_links,
             commands::external_search::web_search,
             commands::external_search::anytxt_search,

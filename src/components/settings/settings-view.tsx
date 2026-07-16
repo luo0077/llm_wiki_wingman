@@ -136,6 +136,8 @@ function initialDraft(
     embeddingOutputDimensionality: embed.outputDimensionality,
     embeddingMaxChunkChars: embed.maxChunkChars,
     embeddingOverlapChunkChars: embed.overlapChunkChars,
+    embeddingConcurrency: embed.concurrency ?? 1,
+    embeddingBatchSize: embed.batchSize ?? 1,
     embeddingExtraHeaders: embed.extraHeaders ?? {},
     multimodalEnabled: multimodal.enabled,
     multimodalUseMainLlm: multimodal.useMainLlm,
@@ -370,6 +372,8 @@ export function SettingsView() {
       outputDimensionality: draft.embeddingOutputDimensionality,
       maxChunkChars: draft.embeddingMaxChunkChars,
       overlapChunkChars: draft.embeddingOverlapChunkChars,
+      concurrency: Math.max(1, Math.min(32, Math.floor(draft.embeddingConcurrency || 1))),
+      batchSize: Math.max(1, Math.min(64, Math.floor(draft.embeddingBatchSize || 1))),
       extraHeaders: draft.embeddingExtraHeaders,
     }
     const newMultimodal = {

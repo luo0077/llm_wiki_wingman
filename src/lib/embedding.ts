@@ -105,6 +105,51 @@ export async function fetchEmbedding(
   }
 }
 
+async function fetchBatchEmbeddings(
+  texts: string[],
+  cfg: EmbeddingConfig,
+): Promise<number[][] | null> {
+  if (texts.length === 0) return []
+  try {
+    const embeddings = await invoke<number[][]>("embedding_fetch_batch", { texts, cfg })
+    if (embeddings.length !== texts.length) {
+      throw new Error(`Embedding batch returned ${embeddings.length} vectors for ${texts.length} inputs`)
+    }
+    lastEmbeddingError = null
+    return embeddings
+  } catch (err) {
+    lastEmbeddingError = err instanceof Error ? err.message : String(err)
+    console.warn(`[Embedding] Batch request failed; retrying inputs individually: ${lastEmbeddingError}`)
+    return null
+  }
+}
+
+function supportsOpenAiCompatibleBatch(cfg: EmbeddingConfig): boolean {
+  const endpoint = cfg.endpoint.toLowerCase()
+  const model = cfg.model.toLowerCase()
+  return !endpoint.includes("generativelanguage.googleapis.com")
+    && !endpoint.includes(":embedcontent")
+    && !model.includes("doubao-embedding-vision")
+}
+
+type AsyncLimiter = <T>(task: () => Promise<T>) => Promise<T>
+
+function createAsyncLimiter(rawLimit: number | undefined): AsyncLimiter {
+  const limit = Math.max(1, Math.min(32, Math.floor(rawLimit ?? 1)))
+  let active = 0
+  const waiters: Array<() => void> = []
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiters.push(resolve))
+    active++
+    try {
+      return await task()
+    } finally {
+      active--
+      waiters.shift()?.()
+    }
+  }
+}
+
 // ── LanceDB v2 operations (via Rust Tauri commands) ──────────────────────
 
 interface ChunkUpsertInput {
@@ -271,6 +316,7 @@ async function preparePageEmbeddingRows(
   title: string,
   content: string,
   cfg: EmbeddingConfig,
+  schedule: AsyncLimiter = createAsyncLimiter(cfg.concurrency),
 ): Promise<PageEmbeddingPreparation> {
   if (!cfg.enabled || !cfg.model) return { status: "empty" }
 
@@ -280,22 +326,33 @@ async function preparePageEmbeddingRows(
   })
   if (chunks.length === 0) return { status: "empty" }
 
-  const rows: ChunkUpsertInput[] = []
-  let failedChunks = 0
-  for (const chunk of chunks) {
-    const embedText = enrichChunkForEmbedding(title, chunk)
-    const vec = await fetchEmbedding(embedText, cfg)
-    if (vec) {
-      rows.push({
-        chunkIndex: chunk.index,
-        chunkText: chunk.text,
-        headingPath: chunk.headingPath,
-        embedding: vec,
+  const batchSize = Math.max(1, Math.min(64, Math.floor(cfg.batchSize ?? 1)))
+  const tasks: Array<Promise<ChunkUpsertInput[]>> = []
+  for (let offset = 0; offset < chunks.length; offset += batchSize) {
+    const batch = chunks.slice(offset, offset + batchSize)
+    const texts = batch.map((chunk) => enrichChunkForEmbedding(title, chunk))
+    tasks.push((async () => {
+      const vectors = batch.length > 1 && supportsOpenAiCompatibleBatch(cfg)
+        ? await schedule(() => fetchBatchEmbeddings(texts, cfg))
+        : null
+      const resolved = vectors ?? await Promise.all(
+        texts.map((text) => schedule(() => fetchEmbedding(text, cfg))),
+      )
+      return resolved.flatMap((embedding, index) => {
+        if (!embedding) return []
+        const chunk = batch[index]
+        return [{
+          chunkIndex: chunk.index,
+          chunkText: chunk.text,
+          headingPath: chunk.headingPath,
+          embedding,
+        }]
       })
-    } else {
-      failedChunks++
-    }
+    })())
   }
+  const rows = (await Promise.all(tasks)).flat()
+  rows.sort((a, b) => a.chunkIndex - b.chunkIndex)
+  const failedChunks = chunks.length - rows.length
 
   if (rows.length === 0) {
     return {
@@ -382,19 +439,38 @@ function throwEmbeddingReindexError(projectPath: string, message: string): never
   throw new Error(message)
 }
 
+async function parallelForEach<T>(
+  items: T[],
+  rawLimit: number | undefined,
+  visit: (item: T) => Promise<void>,
+): Promise<void> {
+  const workerCount = Math.min(
+    items.length,
+    Math.max(1, Math.min(32, Math.floor(rawLimit ?? 1))),
+  )
+  let next = 0
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (next < items.length) {
+      const index = next++
+      await visit(items[index])
+    }
+  }))
+}
+
 async function preparePageEmbeddingRowsWithRetry(
   pageId: string,
   title: string,
   content: string,
   cfg: EmbeddingConfig,
   attempts = 3,
+  schedule: AsyncLimiter = createAsyncLimiter(cfg.concurrency),
 ): Promise<PageEmbeddingPreparation> {
-  let best = await preparePageEmbeddingRows(pageId, title, content, cfg)
+  let best = await preparePageEmbeddingRows(pageId, title, content, cfg, schedule)
   for (let attempt = 1; attempt < attempts; attempt += 1) {
     if (best.status === "empty") return best
     if (best.status === "ready" && best.page.failedChunks === 0) return best
     await new Promise((resolve) => setTimeout(resolve, attempt * 250))
-    const candidate = await preparePageEmbeddingRows(pageId, title, content, cfg)
+    const candidate = await preparePageEmbeddingRows(pageId, title, content, cfg, schedule)
     if (
       candidate.status === "ready"
       && (best.status !== "ready" || candidate.page.failedChunks < best.page.failedChunks)
@@ -450,6 +526,10 @@ export async function embedAllPages(
     }
   }
   walk(tree)
+  const scheduleEmbedding = createAsyncLimiter(cfg.concurrency)
+  // LanceDB page replacement is intentionally serialized. The configured
+  // concurrency applies to outbound embedding HTTP, not database writers.
+  const scheduleVectorWrite = createAsyncLimiter(1)
 
   if (options?.clearExisting) {
     if (mdFiles.length === 0) {
@@ -469,11 +549,18 @@ export async function embedAllPages(
     const preparedPages: PreparedPageEmbedding[] = []
     const failures: string[] = []
     let attempted = 0
-    for (const file of mdFiles) {
+    await parallelForEach(mdFiles, cfg.concurrency, async (file) => {
       try {
         const content = await readFile(file.path)
         const title = extractEmbeddingTitle(content, file.id)
-        const prepared = await preparePageEmbeddingRowsWithRetry(file.id, title, content, cfg)
+        const prepared = await preparePageEmbeddingRowsWithRetry(
+          file.id,
+          title,
+          content,
+          cfg,
+          3,
+          scheduleEmbedding,
+        )
         if (prepared.status === "ready") {
           if (prepared.page.failedChunks > 0) {
             const reason = getLastEmbeddingError()
@@ -497,7 +584,7 @@ export async function embedAllPages(
         total: mdFiles.length,
       })
       if (onProgress) onProgress(attempted, mdFiles.length)
-    }
+    })
 
     if (failures.length > 0) {
       let updated = 0
@@ -560,11 +647,13 @@ export async function embedAllPages(
 
   let done = 0
   let indexed = 0
-  for (const file of mdFiles) {
+  await parallelForEach(mdFiles, cfg.concurrency, async (file) => {
     try {
       const content = await readFile(file.path)
       const title = extractEmbeddingTitle(content, file.id)
-      if (await embedPage(pp, file.id, title, content, cfg, { deferOptimization: true })) {
+      const prepared = await preparePageEmbeddingRows(file.id, title, content, cfg, scheduleEmbedding)
+      if (prepared.status === "ready") {
+        await scheduleVectorWrite(() => vectorUpsertChunks(pp, file.id, prepared.page.rows))
         indexed++
       }
     } catch {
@@ -573,7 +662,7 @@ export async function embedAllPages(
     done++
     setEmbeddingReindexState({ kind: "running", projectPath: pp, done, total: mdFiles.length })
     if (onProgress) onProgress(done, mdFiles.length)
-  }
+  })
 
   if (indexed > 0) {
     await optimizeChunkVectorTableBestEffort(pp)
