@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { MAX_BATCH_URLS, parseImportUrls, urlSourceFileName } from "./url-source-import"
+import { MAX_BATCH_URLS, fetchImportUrl, parseImportUrls, urlSourceFileName } from "./url-source-import"
 
 describe("parseImportUrls", () => {
   it("normalizes fragments, removes duplicates, and preserves order", () => {
@@ -40,5 +40,47 @@ describe("urlSourceFileName", () => {
       .toBe("AUX-web.txt")
     expect(urlSourceFileName("https://example.com/bad%escape", "text/plain", "hello"))
       .toBe("bad-escape.txt")
+  })
+})
+
+describe("fetchImportUrl", () => {
+  it("blocks a public URL redirect before requesting a private target", async () => {
+    const fetch = async (url: string | URL | Request, init?: RequestInit & { maxRedirections?: number }) => {
+      expect(String(url)).toBe("https://example.com/start")
+      expect(init).toMatchObject({ redirect: "manual", maxRedirections: 0 })
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://169.254.169.254/latest/meta-data" },
+      })
+    }
+    await expect(fetchImportUrl(fetch as typeof globalThis.fetch, "https://example.com/start", new AbortController().signal))
+      .rejects.toThrow("cannot redirect")
+  })
+
+  it("blocks IPv4-mapped IPv6 private redirect targets", async () => {
+    const fetch = async () => new Response(null, {
+      status: 302,
+      headers: { location: "http://[::ffff:169.254.169.254]/metadata" },
+    })
+    await expect(fetchImportUrl(fetch as typeof globalThis.fetch, "https://example.com", new AbortController().signal))
+      .rejects.toThrow("cannot redirect")
+  })
+
+  it("allows an explicitly requested private URL and follows relative redirects", async () => {
+    const seen: string[] = []
+    const fetch = async (url: string | URL | Request, init?: RequestInit & { maxRedirections?: number }) => {
+      seen.push(String(url))
+      expect(init).toMatchObject({ redirect: "manual", maxRedirections: 0 })
+      return seen.length === 1
+        ? new Response(null, { status: 302, headers: { location: "/page" } })
+        : new Response("ok", { status: 200 })
+    }
+    const response = await fetchImportUrl(
+      fetch as typeof globalThis.fetch,
+      "http://192.168.1.50/start",
+      new AbortController().signal,
+    )
+    expect(await response.text()).toBe("ok")
+    expect(seen).toEqual(["http://192.168.1.50/start", "http://192.168.1.50/page"])
   })
 })

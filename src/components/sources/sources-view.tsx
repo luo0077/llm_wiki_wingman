@@ -319,7 +319,7 @@ export function SourcesView() {
             <Plus className="mr-1 h-4 w-4" />
             {t("sources.importFolder", "Folder")}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setUrlDialogOpen(true)} disabled={importing}>
+          <Button size="sm" onClick={() => setUrlDialogOpen(true)} disabled={importing}>
             <Link className="mr-1 h-4 w-4" />
             {t("sources.importUrls")}
           </Button>

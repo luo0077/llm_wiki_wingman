@@ -7,6 +7,7 @@ import { enqueueSourceIngest, getUniqueDestPath } from "@/lib/source-lifecycle"
 import { normalizePath } from "@/lib/path-utils"
 
 export const MAX_BATCH_URLS = 50
+const MAX_REDIRECTS = 10
 
 export interface UrlImportResult {
   url: string
@@ -38,6 +39,79 @@ export function parseImportUrls(input: string): string[] {
     }
   }
   return [...unique]
+}
+
+function isPrivateNetworkHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "")
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true
+  if (host === "::" || host === "::1" || /^(?:fc|fd|fe[89ab])/i.test(host)) return true
+  if (host.startsWith("::ffff:")) {
+    const mapped = host.slice(7)
+    if (mapped.includes(".")) return isPrivateNetworkHost(mapped)
+    const groups = mapped.split(":")
+    if (groups.length === 2 && groups.every((group) => /^[0-9a-f]{1,4}$/i.test(group))) {
+      const high = Number.parseInt(groups[0], 16)
+      const low = Number.parseInt(groups[1], 16)
+      return isPrivateNetworkHost(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)
+    }
+  }
+  const parts = host.split(".").map(Number)
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false
+  }
+  const [a, b] = parts
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 198 && (b === 18 || b === 19))
+    || a >= 224
+}
+
+function validateHttpUrl(value: string): URL {
+  const parsed = new URL(value)
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Unsupported URL scheme: ${value}`)
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`URLs with embedded credentials are not allowed: ${value}`)
+  }
+  return parsed
+}
+
+/** @internal Exported for redirect-policy regression tests. */
+export async function fetchImportUrl(
+  fetch: typeof globalThis.fetch,
+  initialUrl: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  let current = validateHttpUrl(initialUrl)
+  const initialIsPrivate = isPrivateNetworkHost(current.hostname)
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+    // Tauri plugin-http does not forward the standard `redirect` option to
+    // reqwest. Its transport-specific maxRedirections flag is therefore
+    // required to expose each 3xx response to this policy loop. Native/Node
+    // fetch ignores the extra field and follows `redirect: "manual"`.
+    const requestInit: RequestInit & { maxRedirections: number } = {
+      redirect: "manual",
+      maxRedirections: 0,
+      signal,
+    }
+    const response = await fetch(current.toString(), requestInit)
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response
+    if (redirects === MAX_REDIRECTS) throw new Error(`Too many redirects (maximum ${MAX_REDIRECTS})`)
+    const location = response.headers.get("location")
+    if (!location) throw new Error("Redirect response is missing a Location header")
+    const next = validateHttpUrl(new URL(location, current).toString())
+    if (!initialIsPrivate && isPrivateNetworkHost(next.hostname)) {
+      throw new Error("A public URL cannot redirect to a private or local network address")
+    }
+    current = next
+  }
+  throw new Error(`Too many redirects (maximum ${MAX_REDIRECTS})`)
 }
 
 function safeSlug(value: string): string {
@@ -96,7 +170,7 @@ export async function importSourceUrls(
       const timeout = setTimeout(() => controller.abort(), 60_000)
       let response: Response
       try {
-        response = await fetch(url, { redirect: "follow", signal: controller.signal })
+        response = await fetchImportUrl(fetch, url, controller.signal)
       } finally {
         clearTimeout(timeout)
       }

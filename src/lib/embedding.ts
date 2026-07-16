@@ -38,6 +38,7 @@ import { parseFrontmatter } from "@/lib/frontmatter"
  * embed.
  */
 let lastEmbeddingError: string | null = null
+let embeddingFailureVersion = 0
 const INCREMENTAL_OPTIMIZE_PAGE_THRESHOLD = 20
 const incrementalOptimizeCounts = new Map<string, number>()
 
@@ -47,6 +48,8 @@ export function getLastEmbeddingError(): string | null {
 
 export function resetEmbeddingOptimizeAccountingForTests(): void {
   incrementalOptimizeCounts.clear()
+  embeddingFailureVersion = 0
+  lastEmbeddingError = null
 }
 
 // ── fetchEmbedding with auto-halve retry ────────────────────────────────
@@ -90,15 +93,19 @@ export async function fetchEmbedding(
   maxRetries = 3,
 ): Promise<number[] | null> {
   if (!cfg.endpoint) return null
+  const failureVersionAtStart = embeddingFailureVersion
   try {
     const embedding = await invoke<number[]>("embedding_fetch", {
       text,
       cfg,
       maxRetries,
     })
-    lastEmbeddingError = null
+    // Do not let a concurrent success erase an error that completed after
+    // this request began. A later sequential success still clears it.
+    if (embeddingFailureVersion === failureVersionAtStart) lastEmbeddingError = null
     return embedding
   } catch (err) {
+    embeddingFailureVersion++
     lastEmbeddingError = err instanceof Error ? err.message : String(err)
     console.warn(`[Embedding] ${lastEmbeddingError}`)
     return null
@@ -110,16 +117,17 @@ async function fetchBatchEmbeddings(
   cfg: EmbeddingConfig,
 ): Promise<number[][] | null> {
   if (texts.length === 0) return []
+  const failureVersionAtStart = embeddingFailureVersion
   try {
     const embeddings = await invoke<number[][]>("embedding_fetch_batch", { texts, cfg })
     if (embeddings.length !== texts.length) {
       throw new Error(`Embedding batch returned ${embeddings.length} vectors for ${texts.length} inputs`)
     }
-    lastEmbeddingError = null
+    if (embeddingFailureVersion === failureVersionAtStart) lastEmbeddingError = null
     return embeddings
   } catch (err) {
-    lastEmbeddingError = err instanceof Error ? err.message : String(err)
-    console.warn(`[Embedding] Batch request failed; retrying inputs individually: ${lastEmbeddingError}`)
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[Embedding] Batch request failed; retrying inputs individually: ${message}`)
     return null
   }
 }
@@ -139,13 +147,19 @@ function createAsyncLimiter(rawLimit: number | undefined): AsyncLimiter {
   let active = 0
   const waiters: Array<() => void> = []
   return async <T>(task: () => Promise<T>): Promise<T> => {
-    if (active >= limit) await new Promise<void>((resolve) => waiters.push(resolve))
-    active++
+    if (active < limit) {
+      active++
+    } else {
+      // A queued resolver owns the permit transferred by the completing task;
+      // it must not increment active again when it resumes.
+      await new Promise<void>((resolve) => waiters.push(resolve))
+    }
     try {
       return await task()
     } finally {
-      active--
-      waiters.shift()?.()
+      const next = waiters.shift()
+      if (next) next()
+      else active--
     }
   }
 }

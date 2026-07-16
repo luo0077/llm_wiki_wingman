@@ -1197,6 +1197,27 @@ describe("fetchEmbedding (via searchByEmbedding) — auto-halve", () => {
     await searchByEmbedding("/tmp/p", "q", cfg, 5)
     expect(getLastEmbeddingError()).toBeNull()
   })
+
+  it("does not let a concurrent success erase a later failure", async () => {
+    mockEmbeddingFetchInvoke.mockImplementation(async (args) => {
+      const { text } = args as { text: string }
+      if (text === "fails") {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        throw new Error("concurrent embedding failed")
+      }
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      return [0.1]
+    })
+    await Promise.all([
+      fetchEmbedding("fails", cfg),
+      fetchEmbedding("succeeds", cfg),
+    ])
+    expect(getLastEmbeddingError()).toContain("concurrent embedding failed")
+
+    mockEmbeddingFetchInvoke.mockResolvedValueOnce([0.2])
+    await fetchEmbedding("later sequential success", cfg)
+    expect(getLastEmbeddingError()).toBeNull()
+  })
 })
 
 // ── embedPage — replaces page's chunks in LanceDB ──────────────────

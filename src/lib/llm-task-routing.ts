@@ -17,6 +17,9 @@ export function resolveProjectLlmConfig(
   projectOverride: ProjectLlmOverride,
   customPresets: CustomLlmPreset[] = [],
 ): LlmConfig {
+  // Keep this fallback contract aligned with project_llm_config in
+  // src-tauri/src/api_server.rs. Native API/MCP callers resolve the same
+  // persisted override without running this TypeScript code.
   if (!projectOverride.enabled || !projectOverride.presetId) return globalConfig
   const preset = findLlmPreset(projectOverride.presetId, customPresets)
   if (!preset) return globalConfig

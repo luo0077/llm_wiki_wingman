@@ -1818,11 +1818,29 @@ fn project_llm_config(parsed: &Value, project_id: &str) -> Option<agent::provide
     let mut profile = project.get("profile")?.clone();
     let profile_object = profile.as_object_mut()?;
     let preset_id = project.get("presetId").and_then(Value::as_str)?;
-    if let Some(provider) = parsed
+    let provider = parsed
         .get("providerConfigs")
         .and_then(|value| value.get(preset_id))
-        .and_then(Value::as_object)
-    {
+        .and_then(Value::as_object);
+    // `customLlmPresets` is the authoritative registry. A stale providerConfigs
+    // entry may survive an interrupted multi-key settings save, so credentials
+    // alone must not resurrect a deleted custom preset.
+    let custom_preset_exists = parsed
+        .get("customLlmPresets")
+        .and_then(Value::as_array)
+        .map(|presets| {
+            presets
+                .iter()
+                .any(|preset| preset.get("id").and_then(Value::as_str) == Some(preset_id))
+        })
+        .unwrap_or(false);
+    // Match resolveProjectLlmConfig in src/lib/llm-task-routing.ts: deleting a
+    // custom preset must make every project that referenced it fall back to
+    // the global config, including projects that are not currently open.
+    if preset_id.starts_with("custom-") && !custom_preset_exists {
+        return global.and_then(|value| serde_json::from_value(value).ok());
+    }
+    if let Some(provider) = provider {
         for key in [
             "apiKey",
             "apiMode",
@@ -2817,5 +2835,50 @@ mod tests {
             "gpt-global"
         );
         assert!(project_llm_config(&state, "legacy").is_none());
+    }
+
+    #[test]
+    fn project_llm_config_falls_back_after_custom_preset_is_deleted() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "providerConfigs": {
+                "custom-deleted": { "apiKey": "stale-secret", "model": "stale-model", "baseUrl": "https://old.example/v1" }
+            },
+            "customLlmPresets": [],
+            "projectLlmOverrides": {
+                "project-b": {
+                    "enabled": true,
+                    "presetId": "custom-deleted",
+                    "model": "stale-model",
+                    "profile": { "provider": "custom", "model": "stale-model", "ollamaUrl": "", "customEndpoint": "https://old.example/v1", "maxContextSize": 64000 }
+                }
+            }
+        });
+        let config = project_llm_config(&state, "project-b").expect("global fallback");
+        assert_eq!(config.model, "gpt-global");
+        assert_eq!(config.api_key, "global");
+    }
+
+    #[test]
+    fn project_llm_config_uses_registered_custom_preset() {
+        let state = json!({
+            "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
+            "customLlmPresets": [{ "id": "custom-live", "label": "Live" }],
+            "providerConfigs": {
+                "custom-live": { "apiKey": "live-secret", "model": "live-model", "baseUrl": "https://live.example/v1" }
+            },
+            "projectLlmOverrides": {
+                "project-c": {
+                    "enabled": true,
+                    "presetId": "custom-live",
+                    "model": "",
+                    "profile": { "provider": "custom", "model": "old-model", "ollamaUrl": "", "customEndpoint": "https://old.example/v1", "maxContextSize": 64000 }
+                }
+            }
+        });
+        let config = project_llm_config(&state, "project-c").expect("custom config");
+        assert_eq!(config.model, "live-model");
+        assert_eq!(config.api_key, "live-secret");
+        assert_eq!(config.custom_endpoint, "https://live.example/v1");
     }
 }
