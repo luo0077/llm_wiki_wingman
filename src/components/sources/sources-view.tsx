@@ -110,7 +110,7 @@ export function SourcesView() {
         {
           name: "Documents",
           extensions: [
-            "md", "mdx", "txt", "rtf", "pdf",
+            "md", "mdx", "txt", "org", "rtf", "pdf",
             "html", "htm", "xml",
             "doc", "docx", "xls", "xlsx", "ppt", "pptx",
             "odt", "ods", "odp", "epub", "mobi", "pages", "numbers", "key",

@@ -82,6 +82,7 @@ pub async fn read_file(path: String, extract_images: Option<bool>) -> Result<Str
 
             match ext.as_str() {
                 "pdf" => extract_pdf_text(&path, include_images),
+                "org" => extract_org_text(&path),
                 e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e),
                 e if EBOOK_EXTS.contains(&e) => crate::commands::ebook::extract_ebook_text(&path, e),
                 e if IMAGE_EXTS.contains(&e) => {
@@ -134,6 +135,7 @@ pub async fn preprocess_file(path: String) -> Result<String, String> {
 
             let text = match ext.as_str() {
                 "pdf" => extract_pdf_text(&path, false)?,
+                "org" => extract_org_text(&path)?,
                 e if OFFICE_EXTS.contains(&e) => extract_office_text(&path, e)?,
                 e if EBOOK_EXTS.contains(&e) => {
                     crate::commands::ebook::extract_ebook_text(&path, e)?
@@ -174,6 +176,135 @@ fn write_cache(original: &Path, text: &str) -> Result<(), String> {
     }
     crate::commands::file_sync::mark_app_write_path(&cache_path);
     fs::write(&cache_path, text).map_err(|e| format!("Failed to write cache: {}", e))
+}
+
+/// Convert common Org syntax into Markdown-shaped text for ingestion and
+/// preview. The original `.org` file remains untouched in `raw/sources`.
+/// Source blocks are copied verbatim inside fences and are never executed.
+fn extract_org_text(path: &str) -> Result<String, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read Org file '{}': {}", path, e))?;
+    Ok(org_to_markdown(&content))
+}
+
+fn org_to_markdown(content: &str) -> String {
+    let normalized = content.replace("\r\n", "\n").replace('\r', "\n");
+    let mut output = Vec::new();
+    let mut block_end: Option<&'static str> = None;
+
+    for line in normalized.lines() {
+        let trimmed = line.trim();
+        let upper = trimmed.to_ascii_uppercase();
+        if let Some(end) = block_end {
+            if upper == end {
+                output.push("```".to_string());
+                block_end = None;
+            } else {
+                output.push(line.to_string());
+            }
+            continue;
+        }
+
+        if upper.starts_with("#+BEGIN_SRC") {
+            let language = trimmed[11..].trim().split_whitespace().next().unwrap_or("");
+            output.push(format!("```{language}"));
+            block_end = Some("#+END_SRC");
+            continue;
+        }
+        if upper == "#+BEGIN_EXAMPLE" {
+            output.push("```text".to_string());
+            block_end = Some("#+END_EXAMPLE");
+            continue;
+        }
+        if upper == "#+BEGIN_QUOTE" {
+            output.push("```text".to_string());
+            block_end = Some("#+END_QUOTE");
+            continue;
+        }
+
+        if let Some((key, value)) = parse_org_keyword(trimmed) {
+            if key == "TITLE" {
+                output.push(format!("# {value}"));
+            } else if !matches!(key.as_str(), "OPTIONS" | "PROPERTY" | "SETUPFILE") {
+                output.push(format!("**{}:** {}", title_case_ascii(&key), value));
+            }
+            continue;
+        }
+
+        if let Some((level, heading)) = parse_org_heading(line) {
+            output.push(format!(
+                "{} {}",
+                "#".repeat(level.min(6)),
+                convert_org_links(heading)
+            ));
+            continue;
+        }
+
+        if trimmed.starts_with('|')
+            && trimmed.ends_with('|')
+            && trimmed.contains('+')
+            && trimmed
+                .chars()
+                .all(|c| matches!(c, '|' | '+' | '-' | ':' | ' '))
+        {
+            output.push(trimmed.replace('+', "|"));
+            continue;
+        }
+
+        output.push(convert_org_links(line));
+    }
+    if block_end.is_some() {
+        output.push("```".to_string());
+    }
+    output.join("\n")
+}
+
+fn parse_org_keyword(line: &str) -> Option<(String, &str)> {
+    let rest = line.strip_prefix("#+")?;
+    let (key, value) = rest.split_once(':')?;
+    if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some((key.to_ascii_uppercase(), value.trim()))
+}
+
+fn parse_org_heading(line: &str) -> Option<(usize, &str)> {
+    let stars = line.chars().take_while(|c| *c == '*').count();
+    if stars == 0 || line.as_bytes().get(stars) != Some(&b' ') {
+        return None;
+    }
+    Some((stars, line[stars + 1..].trim()))
+}
+
+fn title_case_ascii(value: &str) -> String {
+    let lower = value.replace('_', " ").to_ascii_lowercase();
+    let mut chars = lower.chars();
+    chars
+        .next()
+        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+        .unwrap_or_default()
+}
+
+fn convert_org_links(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find("[[") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("]]") else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let inner = &after[..end];
+        if let Some((target, description)) = inner.split_once("][") {
+            out.push_str(&format!("[{}]({})", description, target));
+        } else {
+            out.push_str(&format!("<{}>", inner));
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Global PDFium instance — the library prefers a single binding shared
@@ -1814,6 +1945,29 @@ pub async fn get_file_md5(path: String) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn org_to_markdown_preserves_common_elements_without_executing_source_blocks() {
+        let input = "#+TITLE: Research Notes\r\n#+AUTHOR: Ada\r\n* TODO Topic :rust:notes:\r\nParagraph with [[https://example.com][reference]] and [[file:local.pdf]].\r\n- [ ] Verify\r\n| Name | Value |\r\n|------+-------|\r\n| A    | 1     |\r\n#+BEGIN_SRC sh\r\necho never-run\r\n#+END_SRC\r\n";
+        let output = org_to_markdown(input);
+        assert!(output.contains("# Research Notes"));
+        assert!(output.contains("**Author:** Ada"));
+        assert!(output.contains("# TODO Topic :rust:notes:"));
+        assert!(output.contains("[reference](https://example.com)"));
+        assert!(output.contains("<file:local.pdf>"));
+        assert!(output.contains("|------|-------|"));
+        assert!(output.contains("```sh\necho never-run\n```"));
+    }
+
+    #[test]
+    fn org_to_markdown_closes_unterminated_source_block_and_keeps_unknown_lines() {
+        let output = org_to_markdown(
+            "#+OPTIONS: toc:nil\n#+CUSTOM: kept\n* Heading\n#+BEGIN_SRC python\nprint('text only')",
+        );
+        assert!(!output.contains("OPTIONS"));
+        assert!(output.contains("**Custom:** kept"));
+        assert!(output.ends_with("```"));
+    }
 
     /// Write `bytes` to a fresh tmp path with `.pdf` suffix and return
     /// the path (the OS tmpdir is NOT cleaned up — acceptable for tests).
