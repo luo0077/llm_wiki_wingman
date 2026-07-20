@@ -44,6 +44,7 @@ export function resolveConfig(
     typeof ov.requestTimeoutMinutes === "number" && Number.isFinite(ov.requestTimeoutMinutes)
       ? Math.max(1, Math.min(1440, Math.floor(ov.requestTimeoutMinutes)))
       : fallback.requestTimeoutMinutes
+  const customHeaders = ov.customHeaders
 
   if (preset.provider === "custom") {
     return {
@@ -57,6 +58,7 @@ export function resolveConfig(
       reasoning,
       localCliIsolation: false,
       requestTimeoutMinutes,
+      customHeaders,
     }
   }
 
@@ -71,6 +73,7 @@ export function resolveConfig(
       reasoning,
       localCliIsolation: false,
       requestTimeoutMinutes,
+      customHeaders,
     }
   }
 
@@ -87,6 +90,7 @@ export function resolveConfig(
       reasoning,
       localCliIsolation: false,
       requestTimeoutMinutes,
+      customHeaders,
     }
   }
 
@@ -120,5 +124,6 @@ export function resolveConfig(
     reasoning,
     localCliIsolation: false,
     requestTimeoutMinutes,
+    customHeaders,
   }
 }

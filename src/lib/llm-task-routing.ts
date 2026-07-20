@@ -30,8 +30,10 @@ export function resolveProjectLlmConfig(
   return resolveConfig(preset, override, globalConfig)
 }
 
-export function projectLlmProfile(config: LlmConfig): Omit<LlmConfig, "apiKey"> {
-  const { apiKey: _apiKey, ...profile } = config
+export function projectLlmProfile(config: LlmConfig): Omit<LlmConfig, "apiKey" | "customHeaders"> {
+  // Headers can contain gateway credentials, so keep them in the provider
+  // credential record and merge them at runtime just like the API key.
+  const { apiKey: _apiKey, customHeaders: _customHeaders, ...profile } = config
   return profile
 }
 

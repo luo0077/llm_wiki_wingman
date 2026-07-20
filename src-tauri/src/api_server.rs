@@ -1847,6 +1847,7 @@ fn project_llm_config(parsed: &Value, project_id: &str) -> Option<agent::provide
             "azureApiVersion",
             "maxContextSize",
             "reasoning",
+            "customHeaders",
         ] {
             if let Some(value) = provider.get(key) {
                 profile_object.insert(key.to_string(), value.clone());
@@ -2803,7 +2804,7 @@ mod tests {
         let state = json!({
             "llmConfig": { "provider": "openai", "apiKey": "global", "model": "gpt-global", "ollamaUrl": "", "customEndpoint": "", "maxContextSize": 1000 },
             "providerConfigs": {
-                "deepseek": { "apiKey": "rotated", "model": "provider-model", "baseUrl": "https://new.example/v1", "apiMode": "chat_completions" }
+                "deepseek": { "apiKey": "rotated", "model": "provider-model", "baseUrl": "https://new.example/v1", "apiMode": "chat_completions", "customHeaders": { "X-Tenant-ID": "team-a" } }
             },
             "projectLlmOverrides": {
                 "project-a": {
@@ -2819,6 +2820,10 @@ mod tests {
         assert_eq!(config.api_key, "rotated");
         assert_eq!(config.model, "project-model");
         assert_eq!(config.custom_endpoint, "https://new.example/v1");
+        assert_eq!(
+            config.custom_headers.get("X-Tenant-ID").map(String::as_str),
+            Some("team-a")
+        );
     }
 
     #[test]

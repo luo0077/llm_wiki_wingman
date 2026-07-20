@@ -520,6 +520,8 @@
         "codexCliTimeoutHint": "单次 Codex CLI 请求的总超时时间。长 PDF 摄取或较慢的本地 / 网络会话可适当调大。",
         "requestTimeout": "请求超时时间（分钟）",
         "requestTimeoutHint": "本地 CPU 模型响应较慢时可适当调高，默认 30 分钟。",
+        "customHeaders": "自定义请求头",
+        "customHeadersHint": "可选。每行填写一条 Header-Name: value。Content-Type 和已配置的 API 密钥请求头优先。",
         "cliStatus": "CLI 状态",
         "checkingCli": "正在检查……",
         "recheckCli": "重新检查",

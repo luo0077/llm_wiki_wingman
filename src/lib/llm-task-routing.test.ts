@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolveProjectLlmConfig, resolveTaskLlmConfig } from "./llm-task-routing"
+import { projectLlmProfile, resolveProjectLlmConfig, resolveTaskLlmConfig } from "./llm-task-routing"
 import type { LlmConfig } from "@/stores/wiki-store"
 
 const fallback: LlmConfig = {
@@ -64,6 +64,15 @@ describe("resolveTaskLlmConfig", () => {
 })
 
 describe("resolveProjectLlmConfig", () => {
+  it("does not duplicate API keys or custom headers into project profiles", () => {
+    const profile = projectLlmProfile({
+      ...fallback,
+      customHeaders: { Authorization: "Bearer gateway-secret" },
+    })
+    expect(profile).not.toHaveProperty("apiKey")
+    expect(profile).not.toHaveProperty("customHeaders")
+  })
+
   it("keeps the global config when project overrides are disabled", () => {
     expect(resolveProjectLlmConfig(fallback, {}, {
       enabled: false,

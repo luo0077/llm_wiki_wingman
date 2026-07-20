@@ -4085,6 +4085,7 @@ mod tests {
             reasoning: None,
             max_tokens: None,
             max_context_size: Some(8_000),
+            custom_headers: Default::default(),
         };
         let fitted = fit_context_to_model(context, Some(&config));
         assert!(fitted.system.contains("system"));
@@ -4109,6 +4110,7 @@ mod tests {
             reasoning: None,
             max_tokens: None,
             max_context_size: Some(8_000),
+            custom_headers: Default::default(),
         };
 
         let fitted = fit_context_to_model(context, Some(&config));

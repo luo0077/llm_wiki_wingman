@@ -5,6 +5,7 @@ import {
   getProviderConfig,
   parseAnthropicLine,
   parseGoogleLine,
+  mergeLlmRequestHeaders,
 } from "../llm-providers"
 import type { LlmConfig as RealLlmConfig } from "@/stores/wiki-store"
 
@@ -16,6 +17,40 @@ const makeConfig = (overrides: Partial<RealLlmConfig> = {}): RealLlmConfig => ({
   customEndpoint: "",
   maxContextSize: 204800,
   ...overrides,
+})
+
+describe("custom LLM request headers", () => {
+  it("adds gateway headers and preserves protocol authentication precedence", () => {
+    const cfg = getProviderConfig(makeConfig({
+      provider: "openai",
+      apiKey: "real-key",
+      customHeaders: { "X-Tenant-ID": "team-a", authorization: "Custom secret" },
+    }))
+    expect(cfg.headers["X-Tenant-ID"]).toBe("team-a")
+    expect(cfg.headers.Authorization).toBe("Bearer real-key")
+    expect(cfg.headers.authorization).toBeUndefined()
+  })
+
+  it("allows custom Authorization when a custom endpoint has no API key", () => {
+    const cfg = getProviderConfig(makeConfig({
+      provider: "custom",
+      apiKey: "",
+      customEndpoint: "https://gateway.example/v1",
+      customHeaders: { Authorization: "Basic gateway-token" },
+    }))
+    expect(cfg.headers.Authorization).toBe("Basic gateway-token")
+  })
+
+  it("drops malformed names and newline-bearing values", () => {
+    expect(mergeLlmRequestHeaders({
+      "Bad Header": "value",
+      "X-Good": "ok",
+      "X-Injection": "safe\r\nInjected: yes",
+    }, { "Content-Type": "application/json" })).toEqual({
+      "X-Good": "ok",
+      "Content-Type": "application/json",
+    })
+  })
 })
 
 describe("MiniMax Provider", () => {

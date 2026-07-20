@@ -66,6 +66,31 @@ interface ProviderConfig {
 }
 
 const JSON_CONTENT_TYPE = "application/json"
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/
+
+/**
+ * Merge user-supplied gateway headers with protocol headers. Names are
+ * compared case-insensitively so a differently-cased duplicate cannot bypass
+ * authentication precedence. Invalid names and CR/LF values are ignored at
+ * this boundary because persisted settings may predate UI validation.
+ */
+export function mergeLlmRequestHeaders(
+  custom: Record<string, string> | undefined,
+  required: Record<string, string>,
+): Record<string, string> {
+  const merged = new Map<string, [string, string]>()
+  for (const [name, value] of Object.entries(custom ?? {})) {
+    const trimmedName = name.trim()
+    const trimmedValue = value.trim()
+    if (!HTTP_HEADER_NAME_RE.test(trimmedName) || !trimmedValue || /[\r\n]/.test(trimmedValue)) continue
+    merged.set(trimmedName.toLowerCase(), [trimmedName, trimmedValue])
+  }
+  for (const [name, value] of Object.entries(required)) {
+    if (!value) continue
+    merged.set(name.toLowerCase(), [name, value])
+  }
+  return Object.fromEntries(merged.values())
+}
 
 /**
  * Origin header for local-LLM endpoints (Ollama, LM Studio, llama.cpp
@@ -699,7 +724,8 @@ export function buildAnthropicUrl(base: string): string {
   return `${trimmed}/v1/messages`
 }
 
-function buildAnthropicHeaders(apiKey: string, url: string): Record<string, string> {
+function buildAnthropicHeaders(config: LlmConfig, url: string): Record<string, string> {
+  const apiKey = config.apiKey
   const base: Record<string, string> = {
     "Content-Type": JSON_CONTENT_TYPE,
     "anthropic-version": "2023-06-01",
@@ -710,7 +736,7 @@ function buildAnthropicHeaders(apiKey: string, url: string): Record<string, stri
     base["x-api-key"] = apiKey
     base["anthropic-dangerous-direct-browser-access"] = "true"
   }
-  return base
+  return mergeLlmRequestHeaders(config.customHeaders, base)
 }
 
 /**
@@ -825,10 +851,10 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
     case "openai":
       return {
         url: "https://api.openai.com/v1/chat/completions",
-        headers: {
+        headers: mergeLlmRequestHeaders(config.customHeaders, {
           "Content-Type": JSON_CONTENT_TYPE,
           Authorization: `Bearer ${apiKey}`,
-        },
+        }),
         buildBody: (messages, overrides) => ({
           ...buildOpenAiCompatibleBody(config, messages, overrides),
           model,
@@ -840,7 +866,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
       const url = buildAnthropicUrl("https://api.anthropic.com")
       return {
         url,
-        headers: buildAnthropicHeaders(apiKey, url),
+        headers: buildAnthropicHeaders(config, url),
         buildBody: (messages, overrides) => {
           assertMiniMaxImageSupport(url, model, messages)
           return {
@@ -860,10 +886,10 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
       const encodedModel = encodeURIComponent(model)
       return {
         url: `https://generativelanguage.googleapis.com/v1beta/models/${encodedModel}:streamGenerateContent?alt=sse`,
-        headers: {
+        headers: mergeLlmRequestHeaders(config.customHeaders, {
           "Content-Type": JSON_CONTENT_TYPE,
           "x-goog-api-key": apiKey,
-        },
+        }),
         buildBody: (messages, overrides) => buildGoogleBody(messages, {
           ...(overrides ?? {}),
           reasoning: effectiveReasoning(config, overrides),
@@ -879,10 +905,10 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           model,
           config.azureApiVersion ?? AZURE_OPENAI_API_VERSION,
         ),
-        headers: {
+        headers: mergeLlmRequestHeaders(config.customHeaders, {
           "Content-Type": JSON_CONTENT_TYPE,
           "api-key": apiKey,
-        },
+        }),
         buildBody: (messages, overrides) =>
           buildOpenAiCompatibleBody(config, messages, overrides),
         parseStream: parseOpenAiLine,
@@ -902,10 +928,10 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
       }
       return {
         url: `${ollamaBase}/v1/chat/completions`,
-        headers: {
+        headers: mergeLlmRequestHeaders(config.customHeaders, {
           "Content-Type": JSON_CONTENT_TYPE,
           ...localLlmOriginHeader(),
-        },
+        }),
         buildBody: (messages, overrides) => ({
           ...buildOpenAiCompatibleBody(config, messages, overrides),
           model,
@@ -923,7 +949,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
       const url = buildAnthropicUrl(customEndpoint || "https://api.minimax.io/anthropic")
       return {
         url,
-        headers: buildAnthropicHeaders(apiKey, url),
+        headers: buildAnthropicHeaders(config, url),
         buildBody: (messages, overrides) => {
           assertMiniMaxImageSupport(url, model, messages)
           return {
@@ -955,7 +981,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
         const url = buildAnthropicUrl(customEndpoint)
         return {
           url,
-          headers: buildAnthropicHeaders(apiKey, url),
+          headers: buildAnthropicHeaders(config, url),
           buildBody: (messages, overrides) => {
             assertMiniMaxImageSupport(url, model, messages)
             return {
@@ -983,7 +1009,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
       const azure = isAzureOpenAiEndpoint(url)
       return {
         url,
-        headers: {
+        headers: mergeLlmRequestHeaders(config.customHeaders, {
           "Content-Type": JSON_CONTENT_TYPE,
           ...(apiKey
             ? azure
@@ -995,7 +1021,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
           // workaround. Public custom gateways may reject unexpected
           // browser Origin headers, so leave them untouched.
           ...(!azure && isLocalOrPrivateHttpEndpoint(url) ? localLlmOriginHeader() : {}),
-        },
+        }),
         buildBody: (messages, overrides) => {
           const body = buildOpenAiCompatibleBody(config, messages, overrides)
           if (!azure) body.model = model

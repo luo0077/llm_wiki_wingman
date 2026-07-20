@@ -520,6 +520,8 @@
         "codexCliTimeoutHint": "Overall timeout for one Codex CLI request. Raise this for long PDF ingest or slower local/network sessions.",
         "requestTimeout": "Request timeout (minutes)",
         "requestTimeoutHint": "Increase this for slow local CPU models. The default is 30 minutes.",
+        "customHeaders": "Custom request headers",
+        "customHeadersHint": "Optional. Enter one Header-Name: value per line. Content-Type and configured API-key headers take precedence.",
         "cliStatus": "CLI status",
         "checkingCli": "Checking…",
         "recheckCli": "Re-check",
