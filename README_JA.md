@@ -426,6 +426,7 @@ npm run tauri build    # 本番ビルド
 2. 「デベロッパーモード」を有効にする
 3. 「パッケージ化されていない拡張機能を読み込む」をクリック
 4. `extension/` ディレクトリを選択
+5. `Alt+Shift+L`（macOS は `Command+Shift+L`）で現在のページを直接クリップ。`chrome://extensions/shortcuts` で変更できます
 
 ## クイックスタート
 

@@ -417,6 +417,7 @@ npm run tauri build    # 生产构建
 2. 启用「开发者模式」
 3. 点击「加载已解压的扩展程序」
 4. 选择 `extension/` 目录
+5. 使用 `Alt+Shift+L`（macOS 为 `Command+Shift+L`）直接剪藏当前页面；可在 `chrome://extensions/shortcuts` 中自定义快捷键
 
 ## 快速开始
 

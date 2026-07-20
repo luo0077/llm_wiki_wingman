@@ -20,6 +20,18 @@
       "128": "icon128.png"
     }
   },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "clip-current-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Clip the current page to LLM Wiki"
+    }
+  },
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",

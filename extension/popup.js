@@ -1,4 +1,4 @@
-const API_URLS = ["http://127.0.0.1:19827", "http://localhost:19827"];
+const clipperCore = globalThis.LLMWikiClipper;
 
 const statusBar = document.getElementById("statusBar");
 const titleInput = document.getElementById("titleInput");
@@ -10,68 +10,28 @@ const serverUrlInput = document.getElementById("serverUrlInput");
 const accessTokenInput = document.getElementById("accessTokenInput");
 const saveConnectionBtn = document.getElementById("saveConnectionBtn");
 const connectionSettings = document.getElementById("connectionSettings");
+const shortcutHint = document.getElementById("shortcutHint");
 
 let extractedContent = "";
 let pageUrl = "";
-let apiUrl = API_URLS[0];
+let apiUrl = clipperCore.DEFAULT_API_URLS[0];
 let accessToken = "";
 
-function normalizeServerUrl(value) {
-  let candidate = String(value || "").trim();
-  if (!candidate) return API_URLS[0];
-  if (!/^https?:\/\//i.test(candidate)) candidate = `http://${candidate}`;
-  const parsed = new URL(candidate);
-  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) {
-    throw new Error("Use an http(s) address without embedded credentials");
-  }
-  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
-    throw new Error("Enter only the server origin, without a path, query, or fragment");
-  }
-  if (!parsed.port) parsed.port = "19827";
-  return parsed.origin;
-}
-
 async function loadConnectionSettings() {
-  const saved = await chrome.storage.local.get(["serverUrl", "accessToken"]);
-  try {
-    apiUrl = normalizeServerUrl(saved.serverUrl || API_URLS[0]);
-  } catch {
-    apiUrl = API_URLS[0];
-    connectionSettings.open = true;
-  }
-  accessToken = String(saved.accessToken || "");
+  const saved = await clipperCore.loadSettings();
+  apiUrl = saved.serverUrl;
+  accessToken = saved.accessToken;
   serverUrlInput.value = apiUrl;
   accessTokenInput.value = accessToken;
 }
 
-function requestHeaders(options) {
-  const headers = new Headers(options?.headers || {});
-  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  return headers;
-}
-
 async function clipFetch(path, options) {
-  const method = String(options?.method || "GET").toUpperCase();
-  // Only retry idempotent reads across host aliases. Retrying POST /clip can
-  // duplicate a clip if the server handled the first request but the response
-  // failed before the extension received it.
-  const isDefaultLocalAddress = API_URLS.includes(apiUrl);
-  const urls = method === "GET" && isDefaultLocalAddress
-    ? [apiUrl, ...API_URLS.filter((url) => url !== apiUrl)]
-    : [apiUrl];
-  let lastError;
-
-  for (const baseUrl of urls) {
-    try {
-      const res = await fetch(`${baseUrl}${path}`, { ...options, headers: requestHeaders(options) });
-      apiUrl = baseUrl;
-      return res;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  throw lastError || new Error("Unable to connect to LLM Wiki");
+  const result = await clipperCore.clipFetch(path, options, {
+    serverUrl: apiUrl,
+    accessToken,
+  });
+  apiUrl = result.baseUrl;
+  return result.response;
 }
 
 async function checkConnection() {
@@ -104,13 +64,19 @@ async function loadProjects() {
     const res = await clipFetch("/projects", { method: "GET" });
     const data = await res.json();
     if (data.ok && data.projects?.length > 0) {
+      const { preferredProjectPath } = await clipperCore.loadSettings();
       projectSelect.innerHTML = "";
       for (const proj of data.projects) {
         const opt = document.createElement("option");
         opt.value = proj.path;
         opt.textContent = proj.name + (proj.current ? " (current)" : "");
-        if (proj.current) opt.selected = true;
+        if (proj.path === preferredProjectPath || (!preferredProjectPath && proj.current)) {
+          opt.selected = true;
+        }
         projectSelect.appendChild(opt);
+      }
+      if (!projectSelect.value && data.projects[0]) {
+        projectSelect.value = data.projects[0].path;
       }
       return;
     }
@@ -130,143 +96,17 @@ async function loadProjects() {
 
 async function extractContent() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return;
-
-    pageUrl = tab.url || "";
-    titleInput.value = tab.title || "Untitled";
+    const page = await clipperCore.extractActiveTab();
+    pageUrl = page.url;
+    titleInput.value = page.title;
     urlPreview.textContent = pageUrl;
-
-    // First inject Readability.js and Turndown.js into the page
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["Readability.js", "Turndown.js"],
-    });
-
-    // Then extract content using them
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        try {
-          // Use Readability to extract article content
-          const documentClone = document.cloneNode(true);
-          const reader = new window.Readability(documentClone);
-          const article = reader.parse();
-
-          if (!article || !article.content) {
-            return { error: "Readability could not extract content" };
-          }
-
-          // Use Turndown to convert HTML to Markdown
-          const turndown = new window.TurndownService({
-            headingStyle: "atx",
-            codeBlockStyle: "fenced",
-            bulletListMarker: "-",
-          });
-
-          // Add table support
-          turndown.addRule("tableCell", {
-            filter: ["th", "td"],
-            replacement: (content) => ` ${content.trim()} |`,
-          });
-          turndown.addRule("tableRow", {
-            filter: "tr",
-            replacement: (content) => `|${content}\n`,
-          });
-          turndown.addRule("table", {
-            filter: "table",
-            replacement: (content) => {
-              // Add header separator after first row
-              const lines = content.trim().split("\n");
-              if (lines.length > 0) {
-                const cols = (lines[0].match(/\|/g) || []).length - 1;
-                const separator = "|" + " --- |".repeat(cols);
-                lines.splice(1, 0, separator);
-              }
-              return "\n\n" + lines.join("\n") + "\n\n";
-            },
-          });
-
-          // Remove images that are tracking pixels or tiny
-          turndown.addRule("removeSmallImages", {
-            filter: (node) => {
-              if (node.nodeName !== "IMG") return false;
-              const w = parseInt(node.getAttribute("width") || "999");
-              const h = parseInt(node.getAttribute("height") || "999");
-              return w < 10 || h < 10;
-            },
-            replacement: () => "",
-          });
-
-          const markdown = turndown.turndown(article.content);
-
-          return {
-            title: article.title,
-            content: markdown,
-            excerpt: article.excerpt || "",
-            siteName: article.siteName || "",
-            length: article.length || 0,
-          };
-        } catch (err) {
-          return { error: err.message };
-        }
-      },
-    });
-
-    if (results?.[0]?.result) {
-      const result = results[0].result;
-
-      if (result.error) {
-        contentPreview.textContent = `Extraction failed: ${result.error}. Falling back...`;
-        await fallbackExtract(tab.id);
-        return;
-      }
-
-      // Use Readability's title if better
-      if (result.title && result.title.length > 5) {
-        titleInput.value = result.title;
-      }
-
-      extractedContent = result.content;
-      contentPreview.textContent = extractedContent;
-
-      if (result.excerpt) {
-        contentPreview.textContent = "📝 " + result.excerpt + "\n\n---\n\n" + extractedContent;
-      }
-
-      clipBtn.disabled = false;
-    } else {
-      await fallbackExtract(tab.id);
-    }
+    extractedContent = page.content;
+    contentPreview.textContent = page.excerpt
+      ? `📝 ${page.excerpt}\n\n---\n\n${extractedContent}`
+      : extractedContent;
+    clipBtn.disabled = false;
   } catch (err) {
     contentPreview.textContent = `Error: ${err.message}`;
-  }
-}
-
-// Fallback: simple DOM extraction if Readability fails
-async function fallbackExtract(tabId) {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func: () => {
-      const clone = document.body.cloneNode(true);
-      ["script", "style", "nav", "header", "footer", ".sidebar", ".ad", ".comments"]
-        .forEach((sel) => clone.querySelectorAll(sel).forEach((el) => el.remove()));
-
-      return clone.innerText
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0)
-        .join("\n\n")
-        .slice(0, 50000);
-    },
-  });
-
-  if (results?.[0]?.result) {
-    extractedContent = results[0].result;
-    contentPreview.textContent = extractedContent;
-    clipBtn.disabled = false;
-  } else {
-    contentPreview.textContent = "Failed to extract content";
   }
 }
 
@@ -283,29 +123,23 @@ async function sendClip() {
   statusBar.textContent = "⏳ Sending to LLM Wiki...";
 
   try {
-    const res = await clipFetch("/clip", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: titleInput.value,
-        url: pageUrl,
-        content: extractedContent,
-        projectPath: selectedProject,
-      }),
+    const result = await clipperCore.submitClip({
+      title: titleInput.value,
+      url: pageUrl,
+      content: extractedContent,
+    }, selectedProject, {
+      serverUrl: apiUrl,
+      accessToken,
     });
-
-    const data = await res.json();
-
-    if (data.ok) {
-      const projectName = projectSelect.options[projectSelect.selectedIndex]?.textContent || "project";
-      statusBar.className = "status success";
-      statusBar.textContent = `✓ Saved to ${projectName}`;
-      clipBtn.textContent = "✓ Clipped!";
-    } else {
-      statusBar.className = "status error";
-      statusBar.textContent = `✗ Error: ${data.error}`;
-      clipBtn.disabled = false;
-    }
+    apiUrl = result.baseUrl;
+    await chrome.storage.local.set({
+      serverUrl: apiUrl,
+      preferredProjectPath: selectedProject,
+    });
+    const projectName = projectSelect.options[projectSelect.selectedIndex]?.textContent || "project";
+    statusBar.className = "status success";
+    statusBar.textContent = `✓ Saved to ${projectName}`;
+    clipBtn.textContent = "✓ Clipped!";
   } catch (err) {
     statusBar.className = "status error";
     statusBar.textContent = `✗ Connection failed: ${err.message}`;
@@ -315,9 +149,15 @@ async function sendClip() {
 
 clipBtn.addEventListener("click", sendClip);
 
+projectSelect.addEventListener("change", () => {
+  if (projectSelect.value) {
+    void chrome.storage.local.set({ preferredProjectPath: projectSelect.value });
+  }
+});
+
 saveConnectionBtn.addEventListener("click", async () => {
   try {
-    const nextUrl = normalizeServerUrl(serverUrlInput.value);
+    const nextUrl = clipperCore.normalizeServerUrl(serverUrlInput.value);
     const originPattern = `${new URL(nextUrl).origin}/*`;
     const granted = await chrome.permissions.request({ origins: [originPattern] });
     if (!granted) throw new Error("Host permission was not granted");
@@ -348,6 +188,11 @@ function resizePreview() {
 }
 
 (async () => {
+  const commands = await chrome.commands.getAll();
+  const clipCommand = commands.find((command) => command.name === "clip-current-page");
+  shortcutHint.textContent = clipCommand?.shortcut
+    ? `Shortcut: ${clipCommand.shortcut}`
+    : "Set a shortcut at chrome://extensions/shortcuts";
   await loadConnectionSettings();
   const connected = await checkConnection();
   // Always extract content so user can preview, even if app not running

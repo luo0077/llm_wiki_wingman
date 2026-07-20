@@ -417,6 +417,7 @@ npm run tauri build    # Production build
 2. Enable "Developer mode"
 3. Click "Load unpacked"
 4. Select the `extension/` directory
+5. Clip the current page with `Alt+Shift+L` (`Command+Shift+L` on macOS). Customize it at `chrome://extensions/shortcuts`.
 
 ## Quick Start
 

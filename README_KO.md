@@ -426,6 +426,7 @@ npm run tauri build    # Production build
 2. "Developer mode"를 활성화합니다
 3. "Load unpacked"를 클릭합니다
 4. `extension/` 디렉터리를 선택합니다
+5. `Alt+Shift+L`(macOS에서는 `Command+Shift+L`)로 현재 페이지를 바로 클립합니다. `chrome://extensions/shortcuts`에서 단축키를 변경할 수 있습니다
 
 ## 빠른 시작
 
