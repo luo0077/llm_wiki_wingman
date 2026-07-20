@@ -45,6 +45,8 @@ interface LlmConfig {
   codexCliTimeoutMinutes?: number
   /** HTTP LLM request backstop. Defaults to 30 minutes for legacy configs. */
   requestTimeoutMinutes?: number
+  /** Defaults to true. HTTP providers use a non-streaming wire when false. */
+  streamingEnabled?: boolean
   /** Optional headers added to every HTTP request for this provider preset. */
   customHeaders?: Record<string, string>
 }
@@ -325,6 +327,7 @@ export interface ProviderOverride {
   localCliIsolation?: boolean
   codexCliTimeoutMinutes?: number
   requestTimeoutMinutes?: number
+  streamingEnabled?: boolean
   customHeaders?: Record<string, string>
 }
 

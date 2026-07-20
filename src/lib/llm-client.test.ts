@@ -91,6 +91,49 @@ const cfg: LlmConfig = {
   maxContextSize: 8192,
 }
 
+describe("streamChat — non-streaming HTTP responses", () => {
+  beforeEach(() => mockHttpFetch.mockReset())
+
+  it("emits one complete token and completes", async () => {
+    mockHttpFetch.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "complete answer" } }],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))
+    const onToken = vi.fn()
+    const onDone = vi.fn()
+    const onError = vi.fn()
+
+    await streamChat(
+      { ...cfg, streamingEnabled: false },
+      [{ role: "user", content: "hi" }],
+      { onToken, onDone, onError },
+    )
+
+    expect(onToken).toHaveBeenCalledTimes(1)
+    expect(onToken).toHaveBeenCalledWith("complete answer")
+    expect(onDone).toHaveBeenCalledTimes(1)
+    expect(onError).not.toHaveBeenCalled()
+    expect(JSON.parse(String(mockHttpFetch.mock.calls[0][1]?.body))).toMatchObject({ stream: false })
+  })
+
+  it("reports an empty complete response instead of silently succeeding", async () => {
+    mockHttpFetch.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: "" } }],
+    }), { status: 200 }))
+    const onError = vi.fn()
+
+    await streamChat(
+      { ...cfg, streamingEnabled: false },
+      [{ role: "user", content: "hi" }],
+      { onToken: vi.fn(), onDone: vi.fn(), onError },
+    )
+
+    expect(onError.mock.calls[0][0].message).toContain("empty non-streaming response")
+  })
+})
+
 /** A Response whose reader.read() stays pending until we reject it,
  *  letting the test interleave the 30-min backstop before the abort.
  *  `readCalled` resolves once streamChat reaches read(), so the test

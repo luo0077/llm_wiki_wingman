@@ -382,11 +382,12 @@ function PresetRow({
   const localCliIsolation = ov.localCliIsolation === true
   const codexCliTimeoutMinutes = Math.max(1, Math.min(240, ov.codexCliTimeoutMinutes ?? 10))
   const requestTimeoutMinutes = Math.max(1, Math.min(1440, ov.requestTimeoutMinutes ?? 30))
+  const streamingEnabled = ov.streamingEnabled !== false
   const [headersText, setHeadersText] = useState(() => llmHeadersToText(ov.customHeaders))
   const isLocalCliProvider = preset.provider === "claude-code" || preset.provider === "codex-cli"
   const [testState, setTestState] = useState<ProviderTestState>({ kind: "idle" })
   const hasConfig = !!apiKey || !!ov.baseUrl || !!ov.model || !!ov.azureApiVersion || !!ov.azureModelFamily
-    || Object.keys(ov.customHeaders ?? {}).length > 0
+    || Object.keys(ov.customHeaders ?? {}).length > 0 || ov.streamingEnabled === false
   // Local CLI providers authenticate via their own existing login state
   // (inherited by the spawned subprocess), so no API key field is shown.
   // Ollama ditto for its local-only model.
@@ -686,6 +687,45 @@ function PresetRow({
               value={context}
               onChange={(v) => onChange({ maxContextSize: v })}
             />
+          </div>
+
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">
+                  {t("settings.sections.llm.streamingOutput")}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("settings.sections.llm.streamingOutputHint")}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={streamingEnabled}
+                onClick={() => onChange({ streamingEnabled: !streamingEnabled })}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors ${
+                  streamingEnabled
+                    ? "border-primary bg-primary"
+                    : "border-muted-foreground/30 bg-muted-foreground/20 hover:bg-muted-foreground/30"
+                }`}
+                title={streamingEnabled
+                  ? t("settings.sections.llm.streamingOutputOn")
+                  : t("settings.sections.llm.streamingOutputOff")}
+                aria-label={t("settings.sections.llm.streamingOutput")}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-1 ring-black/10 transition-transform ${
+                    streamingEnabled ? "translate-x-4" : "translate-x-0.5"
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+              {streamingEnabled
+                ? t("settings.sections.llm.streamingOutputOn")
+                : t("settings.sections.llm.streamingOutputOff")}
+            </div>
           </div>
 
           {!isLocalCliProvider && (

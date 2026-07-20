@@ -45,6 +45,11 @@ export function resolveConfig(
       ? Math.max(1, Math.min(1440, Math.floor(ov.requestTimeoutMinutes)))
       : fallback.requestTimeoutMinutes
   const customHeaders = ov.customHeaders
+  // Streaming is a per-preset preference. Never inherit it from the currently
+  // active fallback preset, or a newly selected provider would silently adopt
+  // the previous provider's disabled state. Missing means legacy/default on.
+  const streamingEnabled = ov.streamingEnabled
+  const streamingConfig = streamingEnabled === undefined ? {} : { streamingEnabled }
 
   if (preset.provider === "custom") {
     return {
@@ -59,6 +64,7 @@ export function resolveConfig(
       localCliIsolation: false,
       requestTimeoutMinutes,
       customHeaders,
+      ...streamingConfig,
     }
   }
 
@@ -74,6 +80,7 @@ export function resolveConfig(
       localCliIsolation: false,
       requestTimeoutMinutes,
       customHeaders,
+      ...streamingConfig,
     }
   }
 
@@ -91,6 +98,7 @@ export function resolveConfig(
       localCliIsolation: false,
       requestTimeoutMinutes,
       customHeaders,
+      ...streamingConfig,
     }
   }
 
@@ -108,6 +116,7 @@ export function resolveConfig(
       localCliIsolation,
       codexCliTimeoutMinutes: preset.provider === "codex-cli" ? codexCliTimeoutMinutes : undefined,
       requestTimeoutMinutes,
+      ...streamingConfig,
     }
   }
 
@@ -125,5 +134,6 @@ export function resolveConfig(
     localCliIsolation: false,
     requestTimeoutMinutes,
     customHeaders,
+    ...streamingConfig,
   }
 }

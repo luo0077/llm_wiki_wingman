@@ -4176,6 +4176,7 @@ mod tests {
             max_tokens: None,
             max_context_size: Some(8_000),
             custom_headers: Default::default(),
+            streaming_enabled: None,
         };
         let fitted = fit_context_to_model(context, Some(&config));
         assert!(fitted.system.contains("system"));
@@ -4201,6 +4202,7 @@ mod tests {
             max_tokens: None,
             max_context_size: Some(8_000),
             custom_headers: Default::default(),
+            streaming_enabled: None,
         };
 
         let fitted = fit_context_to_model(context, Some(&config));

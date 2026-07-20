@@ -53,6 +53,9 @@ pub struct LlmConfig {
     /// each request because app-state may be edited outside the settings UI.
     #[serde(default)]
     pub custom_headers: BTreeMap<String, String>,
+    /// Missing keeps the historical streaming behavior for existing configs.
+    #[serde(default)]
+    pub streaming_enabled: Option<bool>,
 }
 
 impl LlmConfig {
@@ -211,11 +214,16 @@ impl LlmClient {
         system: &str,
         user: &str,
         images: &[AgentImage],
-        on_delta: F,
+        mut on_delta: F,
     ) -> Result<String, String>
     where
         F: FnMut(&str) + Send,
     {
+        if self.config.streaming_enabled == Some(false) {
+            let text = self.generate_text(system, user, images).await?;
+            on_delta(&text);
+            return Ok(text);
+        }
         match self.config.provider.as_str() {
             "openai" => {
                 self.stream_openai_like(
@@ -991,6 +999,7 @@ mod tests {
             max_tokens: None,
             max_context_size: None,
             custom_headers: BTreeMap::new(),
+            streaming_enabled: None,
         }
     }
 
@@ -1092,6 +1101,14 @@ mod tests {
             Some(4096)
         );
         assert_eq!(cfg.max_tokens, None);
+        assert_eq!(cfg.streaming_enabled, None);
+
+        let disabled: LlmConfig = serde_json::from_value(json!({
+            "provider": "openai",
+            "streamingEnabled": false
+        }))
+        .unwrap();
+        assert_eq!(disabled.streaming_enabled, Some(false));
     }
 
     #[test]
