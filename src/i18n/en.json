@@ -344,6 +344,8 @@
     "title": "Wiki Lint",
     "semantic": "Semantic (LLM)",
     "running": "Running...",
+    "cancel": "Cancel check",
+    "cancelProgress": "Cancel {{completed}}/{{total}}",
     "runLint": "Run Lint",
     "runLintHint": "Run lint to check wiki health",
     "runLintDescription": "Checks for orphan pages, broken links, and more",

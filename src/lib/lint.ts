@@ -6,6 +6,11 @@ import { useActivityStore } from "@/stores/activity-store"
 import { getFileName, getRelativePath, normalizePath } from "@/lib/path-utils"
 import { buildLanguageDirective } from "@/lib/output-language"
 import { normalizeReviewTitle } from "@/lib/review-utils"
+import {
+  computeStructuralLint,
+  type StructuralLintFinding,
+  type StructuralLintPage,
+} from "@/lib/lint-structural-core"
 
 export interface LintResult {
   type: "orphan" | "broken-link" | "no-outlinks" | "semantic"
@@ -18,13 +23,7 @@ export interface LintResult {
   suggestedSource?: string
 }
 
-const BROKEN_LINK_SUGGESTION_MIN_SCORE = 0.74
-const RELATED_PAGE_SUGGESTION_MIN_SCORE = 0.08
-const SAME_FOLDER_SCORE_BONUS = 0.08
-const SINGLE_CJK_TOKEN_WEIGHT = 0.35
 const SUGGESTION_TOKEN_WINDOW = 4000
-const SAME_BASENAME_SCORE = 0.96
-const CONTAINS_TARGET_SCORE = 0.82
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -53,14 +52,6 @@ function extractWikilinks(content: string): string[] {
 function relativeToSlug(relativePath: string): string {
   // relativePath relative to wiki/ dir, e.g. "entities/foo-bar" or "queries/my-page-2024-01-01"
   return relativePath.replace(/\.md$/, "")
-}
-
-function normalizeLinkTarget(target: string): string {
-  return normalizePath(target)
-    .replace(/^wiki\//i, "")
-    .replace(/\.md$/i, "")
-    .trim()
-    .toLowerCase()
 }
 
 /**
@@ -113,66 +104,58 @@ function tokenizeForSuggestion(text: string): Set<string> {
   return tokens
 }
 
-function levenshtein(a: string, b: string): number {
-  if (a === b) return 0
-  if (!a) return b.length
-  if (!b) return a.length
-  const previous = Array.from({ length: b.length + 1 }, (_, i) => i)
-  const current = new Array<number>(b.length + 1)
-  for (let i = 1; i <= a.length; i++) {
-    current[0] = i
-    for (let j = 1; j <= b.length; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      current[j] = Math.min(
-        current[j - 1] + 1,
-        previous[j] + 1,
-        previous[j - 1] + cost,
-      )
-    }
-    for (let j = 0; j <= b.length; j++) previous[j] = current[j]
-  }
-  return previous[b.length]
-}
-
-function stringSimilarity(a: string, b: string): number {
-  const left = normalizeLinkTarget(a)
-  const right = normalizeLinkTarget(b)
-  if (!left || !right) return 0
-  if (left === right) return 1
-  const leftBase = getFileName(left)
-  const rightBase = getFileName(right)
-  if (leftBase === rightBase) return SAME_BASENAME_SCORE
-  if (right.includes(left) || left.includes(right)) return CONTAINS_TARGET_SCORE
-  if (leftBase.length < 5 || rightBase.length < 5) return 0
-  const maxLen = Math.max(leftBase.length, rightBase.length)
-  if (maxLen === 0) return 0
-  return 1 - levenshtein(leftBase, rightBase) / maxLen
-}
-
-/**
- * Build a slug → absolute path map from wiki files. Keys are lowercased
- * so [[Transformer]] matches transformer.md — wikilink matching should
- * be case-insensitive (matching typical wiki conventions). Callers must
- * also lowercase their lookup keys.
- */
-function buildSlugMap(
-  wikiFiles: FileNode[],
-  wikiRoot: string,
-): Map<string, string> {
-  const map = new Map<string, string>()
-  for (const f of wikiFiles) {
-    // e.g. /path/to/project/wiki/entities/foo.md → entities/foo
-    const rel = getRelativePath(f.path, wikiRoot).replace(/\.md$/, "")
-    map.set(rel.toLowerCase(), f.path)
-    // also index by basename without extension
-    map.set(f.name.replace(/\.md$/, "").toLowerCase(), f.path)
-  }
-  return map
-}
-
 // ── Structural lint ───────────────────────────────────────────────────────────
 
-export async function runStructuralLint(projectPath: string): Promise<LintResult[]> {
+export interface StructuralLintOptions {
+  signal?: AbortSignal
+  onProgress?: (completed: number, total: number) => void
+}
+
+function runStructuralWorker(
+  pages: StructuralLintPage[],
+  options: StructuralLintOptions,
+): Promise<StructuralLintFinding[]> {
+  if (typeof Worker === "undefined") {
+    return Promise.resolve(computeStructuralLint(pages, options.onProgress))
+  }
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./lint-structural.worker.ts", import.meta.url), { type: "module" })
+    const abort = () => {
+      worker.terminate()
+      reject(new DOMException("Structural lint cancelled", "AbortError"))
+    }
+    if (options.signal?.aborted) {
+      abort()
+      return
+    }
+    options.signal?.addEventListener("abort", abort, { once: true })
+    worker.onerror = (event) => {
+      options.signal?.removeEventListener("abort", abort)
+      worker.terminate()
+      reject(new Error(event.message || "Structural lint worker failed"))
+    }
+    worker.onmessage = (event: MessageEvent<{
+      type: "progress" | "done"
+      completed?: number
+      total?: number
+      findings?: StructuralLintFinding[]
+    }>) => {
+      if (event.data.type === "progress") {
+        options.onProgress?.(event.data.completed ?? 0, event.data.total ?? pages.length)
+        return
+      }
+      options.signal?.removeEventListener("abort", abort)
+      worker.terminate()
+      resolve(event.data.findings ?? [])
+    }
+    worker.postMessage({ pages })
+  })
+}
+
+export async function runStructuralLint(
+  projectPath: string,
+  options: StructuralLintOptions = {},
+): Promise<LintResult[]> {
   const wikiRoot = `${normalizePath(projectPath)}/wiki`
   let tree: FileNode[]
   try {
@@ -187,21 +170,11 @@ export async function runStructuralLint(projectPath: string): Promise<LintResult
     (f) => f.name !== "index.md" && f.name !== "log.md"
   )
 
-  const slugMap = buildSlugMap(contentFiles, wikiRoot)
+  const pages: StructuralLintPage[] = []
 
-  // Read all content files
-  type PageData = {
-    path: string
-    shortName: string
-    slug: string
-    title: string
-    content: string
-    outlinks: string[]
-    tokens: Set<string>
-  }
-  const pages: PageData[] = []
-
-  for (const f of contentFiles) {
+  for (let index = 0; index < contentFiles.length; index += 1) {
+    if (options.signal?.aborted) throw new DOMException("Structural lint cancelled", "AbortError")
+    const f = contentFiles[index]
     try {
       const content = await readFile(f.path)
       const shortName = getRelativePath(f.path, wikiRoot)
@@ -209,117 +182,17 @@ export async function runStructuralLint(projectPath: string): Promise<LintResult
       const title = extractTitle(content, shortName)
       const outlinks = extractWikilinks(content)
       const slugName = getFileName(slug)
-      const tokens = tokenizeForSuggestion(`${title}\n${slugName}\n${content.slice(0, SUGGESTION_TOKEN_WINDOW)}`)
-      pages.push({ path: f.path, shortName, slug, title, content, outlinks, tokens })
+      const tokens = Array.from(tokenizeForSuggestion(`${title}\n${slugName}\n${content.slice(0, SUGGESTION_TOKEN_WINDOW)}`))
+      pages.push({ shortName, slug, title, outlinks, tokens })
     } catch {
       // skip unreadable files
     }
+    options.onProgress?.(index + 1, contentFiles.length * 2)
   }
-
-  function suggestBrokenTarget(target: string): PageData | undefined {
-    let best: { page: PageData; score: number } | undefined
-    for (const candidate of pages) {
-      const score = Math.max(
-        stringSimilarity(target, candidate.slug),
-        stringSimilarity(target, candidate.shortName),
-        stringSimilarity(target, candidate.title),
-      )
-      if (score > (best?.score ?? 0)) best = { page: candidate, score }
-    }
-    return best && best.score >= BROKEN_LINK_SUGGESTION_MIN_SCORE ? best.page : undefined
-  }
-
-  function suggestRelatedPage(page: PageData, direction: "source" | "target"): PageData | undefined {
-    const existingOutlinks = new Set(page.outlinks.map(normalizeLinkTarget))
-    let best: { page: PageData; score: number } | undefined
-    for (const candidate of pages) {
-      if (candidate.shortName === page.shortName) continue
-      if (direction === "target") {
-        const candidateKeys = [
-          normalizeLinkTarget(candidate.slug),
-          normalizeLinkTarget(candidate.shortName),
-          normalizeLinkTarget(getFileName(candidate.shortName).replace(/\.md$/i, "")),
-        ]
-        if (candidateKeys.some((key) => existingOutlinks.has(key))) continue
-      }
-      let overlap = 0
-      for (const token of page.tokens) {
-        if (candidate.tokens.has(token)) overlap += token.length > 1 ? 1 : SINGLE_CJK_TOKEN_WEIGHT
-      }
-      if (overlap === 0) continue
-      const folderBonus =
-        page.shortName.split("/")[0] === candidate.shortName.split("/")[0] ? SAME_FOLDER_SCORE_BONUS : 0
-      const score =
-        overlap / Math.sqrt(Math.max(1, page.tokens.size) * Math.max(1, candidate.tokens.size)) +
-        folderBonus
-      if (score > (best?.score ?? 0)) best = { page: candidate, score }
-    }
-    return best && best.score >= RELATED_PAGE_SUGGESTION_MIN_SCORE ? best.page : undefined
-  }
-
-  // Build inbound link count. Lookups are case-insensitive — [[Transformer]]
-  // should match transformer.md (slug "transformer").
-  const inboundCounts = new Map<string, number>()
-  for (const p of pages) {
-    for (const link of p.outlinks) {
-      const lookup = link.toLowerCase()
-      const target = slugMap.has(lookup)
-        ? relativeToSlug(getRelativePath(slugMap.get(lookup)!, wikiRoot)).toLowerCase()
-        : lookup
-      inboundCounts.set(target, (inboundCounts.get(target) ?? 0) + 1)
-    }
-  }
-
-  const results: LintResult[] = []
-
-  for (const p of pages) {
-    const shortName = p.shortName
-
-    // Orphan: no inbound links (lowercased slug for case-insensitive match)
-    const inbound = inboundCounts.get(p.slug.toLowerCase()) ?? 0
-    if (inbound === 0) {
-      const suggestedSource = suggestRelatedPage(p, "source")
-      results.push({
-        type: "orphan",
-        severity: "info",
-        page: shortName,
-        detail: "No other pages link to this page.",
-        suggestedSource: suggestedSource?.shortName,
-      })
-    }
-
-    // No outbound links
-    if (p.outlinks.length === 0) {
-      const suggestedTarget = suggestRelatedPage(p, "target")
-      results.push({
-        type: "no-outlinks",
-        severity: "info",
-        page: shortName,
-        detail: "This page has no [[wikilink]] references to other pages.",
-        suggestedTarget: suggestedTarget?.shortName,
-      })
-    }
-
-    // Broken links — case-insensitive matching.
-    for (const link of p.outlinks) {
-      const lookup = link.toLowerCase()
-      const basename = getFileName(link).replace(/\.md$/, "").toLowerCase()
-      const exists = slugMap.has(lookup) || slugMap.has(basename)
-      if (!exists) {
-        const suggestedTarget = suggestBrokenTarget(link)
-        results.push({
-          type: "broken-link",
-          severity: "warning",
-          page: shortName,
-          detail: `Broken link: [[${link}]] — target page not found.`,
-          brokenTarget: link,
-          suggestedTarget: suggestedTarget?.shortName,
-        })
-      }
-    }
-  }
-
-  return results
+  return runStructuralWorker(pages, {
+    ...options,
+    onProgress: (completed, total) => options.onProgress?.(contentFiles.length + completed, contentFiles.length + total),
+  })
 }
 
 // ── Semantic lint ─────────────────────────────────────────────────────────────
@@ -330,6 +203,7 @@ const LINT_BLOCK_REGEX =
 export async function runSemanticLint(
   projectPath: string,
   llmConfig: LlmConfig,
+  signal?: AbortSignal,
 ): Promise<LintResult[]> {
   const pp = normalizePath(projectPath)
   const activity = useActivityStore.getState()
@@ -360,6 +234,7 @@ export async function runSemanticLint(
   const summaries: string[] = []
   const existingPageNames = new Set<string>()
   for (const f of wikiFiles) {
+    if (signal?.aborted) throw new DOMException("Semantic lint cancelled", "AbortError")
     const basename = f.name.replace(/\.md$/i, "")
     if (basename) existingPageNames.add(normalizeForExistence(basename))
     try {
@@ -432,8 +307,10 @@ export async function runSemanticLint(
         })
       },
     },
+    signal,
   )
 
+  if (signal?.aborted) throw new DOMException("Semantic lint cancelled", "AbortError")
   if (hadError) return []
 
   const results: LintResult[] = []

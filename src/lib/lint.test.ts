@@ -222,6 +222,18 @@ describe("runSemanticLint — activity & early returns", () => {
 })
 
 describe("runStructuralLint — link suggestions", () => {
+  it("stops before reading pages when cancellation is already requested", async () => {
+    const pages = [makeFileNode("a.md", "# A")]
+    mockListDirectory.mockResolvedValue(pages.map((entry) => entry.node))
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(runStructuralLint("/project", { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    })
+    expect(mockReadFile).not.toHaveBeenCalled()
+  })
+
   it("suggests the closest existing page for a broken wikilink", async () => {
     const pages = [
       makeFileNode("transformer.md", "---\ntitle: Transformer\n---\n# Transformer\nAttention model."),

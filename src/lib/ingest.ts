@@ -603,6 +603,17 @@ export function formatIngestWarningLogEntry(
   ].join("\n")
 }
 
+export function buildDeterministicIngestLog(
+  existing: string,
+  sourceIdentity: string,
+  date = currentWikiDate(),
+): string {
+  const entry = `## [${date}] ingest | ${sourceIdentity}`
+  return existing.trim()
+    ? `${existing.trimEnd()}\n\n${entry}\n`
+    : `# Wiki Log\n\n${entry}\n`
+}
+
 async function appendIngestWarningLog(
   projectPath: string,
   sourceIdentity: string,
@@ -1123,85 +1134,20 @@ async function autoIngestImpl(
     )
   }
 
-  const aggregateRepairPaths = aggregatePathsNeedingRepair(writtenPaths, writeWarnings)
-  const repairableAggregatePaths = aggregateRepairPaths.filter((path) =>
-    isAggregateRepairSafe(path, index, overview, llmConfig.maxContextSize),
-  )
-  const skippedAggregatePaths = aggregateRepairPaths.filter((path) =>
-    !repairableAggregatePaths.includes(path),
-  )
-  if (skippedAggregatePaths.length > 0) {
-    writeWarnings.push(
-      `Skipped aggregate repair for ${skippedAggregatePaths.join(", ")} because the existing file is too large to safely regenerate without truncating existing entries.`,
-    )
-  }
-  if (repairableAggregatePaths.length > 0 && !signal?.aborted) {
-    activity.updateItem(activityId, {
-      detail: `Repairing aggregate wiki files: ${repairableAggregatePaths.join(", ")}`,
-    })
-    let aggregateRepairOutput = ""
+  // log.md is append-only structural metadata. If the model omitted its FILE
+  // block, write a deterministic entry instead of starting another LLM turn.
+  // This keeps multi-file imports at two generation stages per source and
+  // prevents a slow provider from making the queue appear stuck in "repair".
+  if (!writtenPaths.some((path) => normalizePath(path).toLowerCase() === "wiki/log.md") && !signal?.aborted) {
     try {
-      await streamChat(
-        llmConfig,
-        [
-          {
-            role: "system",
-            content: buildAggregateRepairPrompt(
-              repairableAggregatePaths,
-              purpose,
-              index,
-              overview,
-              sourceIdentity,
-              analysis,
-              sourceContext,
-              generation,
-              llmConfig.maxContextSize,
-            ),
-          },
-          {
-            role: "user",
-            content: "Emit the requested aggregate FILE blocks now. Start immediately with `---FILE:`.",
-          },
-        ],
-        {
-          onToken: (token) => { aggregateRepairOutput += token },
-          onDone: () => {},
-          onError: (err) => {
-            writeWarnings.push(`Aggregate repair failed: ${err.message}`)
-          },
-        },
-        signal,
-        {
-          temperature: 0.1,
-          reasoning: { mode: "off" },
-          max_tokens: computeIngestReviewMaxTokens(llmConfig.maxContextSize),
-        },
-      )
-      throwIfIngestAborted(signal, activityId)
-      if (aggregateRepairOutput.trim()) {
-        const filteredRepair = filterAggregateRepairOutput(
-          aggregateRepairOutput,
-          repairableAggregatePaths,
-        )
-        writeWarnings.push(...filteredRepair.warnings)
-        const repairResult = await writeFileBlocks(
-          pp,
-          filteredRepair.text,
-          llmConfig,
-          sourceIdentity,
-          sourceSummaryPath,
-          signal,
-          activityId,
-          onFileWritten,
-        )
-        writtenPaths.push(...repairResult.writtenPaths)
-        writeWarnings.push(...repairResult.warnings)
-        hardFailures.push(...repairResult.hardFailures)
-      }
+      const logPath = `${pp}/wiki/log.md`
+      const existingLog = await tryReadFile(logPath)
+      await writeFile(logPath, buildDeterministicIngestLog(existingLog, sourceIdentity))
+      writtenPaths.push("wiki/log.md")
+      onFileWritten?.("wiki/log.md")
     } catch (err) {
-      throwIfIngestAborted(signal, activityId)
       writeWarnings.push(
-        `Aggregate repair failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Deterministic log update failed: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   }
@@ -1420,16 +1366,6 @@ export function rewriteIngestPathFromTitleForTargetLanguage(
   return isSafeIngestPath(nextPath) ? nextPath : relativePath
 }
 
-export function aggregatePathsNeedingRepair(writtenPaths: string[], warnings: string[]): string[] {
-  const written = new Set(writtenPaths.map((path) => normalizePath(path)))
-  const warningText = warnings.join("\n")
-  // index.md is maintained deterministically and overview.md is intentionally
-  // bounded/stable. Only the append-only log still needs an LLM repair block.
-  return AGGREGATE_WIKI_PATHS.filter((path) => path === "wiki/log.md").filter((path) =>
-    !written.has(path) || warningText.includes(`"${path}"`),
-  )
-}
-
 async function updateWikiIndexDeterministically(
   projectPath: string,
   writtenPaths: string[],
@@ -1485,44 +1421,6 @@ export function updateBoundedRecentIndexSection(index: string, additions: string
   const suffix = sectionEnd >= 0 ? lines.slice(sectionEnd) : []
   const recent = Array.from(new Set([...additions, ...existing])).slice(0, 200)
   return [...prefix, "", section, ...recent, ...(suffix.length ? ["", ...suffix] : []), ""].join("\n")
-}
-
-export function filterAggregateRepairOutput(text: string, allowedPaths: string[]): {
-  text: string
-  warnings: string[]
-} {
-  const allowed = new Set(allowedPaths.map((path) => normalizePath(path)))
-  const { blocks, warnings } = parseFileBlocks(text)
-  const kept = blocks.filter((block) => allowed.has(normalizePath(block.path)))
-  const dropped = blocks.filter((block) => !allowed.has(normalizePath(block.path)))
-  if (dropped.length > 0) {
-    warnings.push(
-      `Dropped ${dropped.length} non-aggregate block(s) from aggregate repair output: ${dropped.map((block) => block.path).join(", ")}`,
-    )
-  }
-  return {
-    text: kept
-      .map((block) => `---FILE: ${block.path}---\n${block.content.trimEnd()}\n---END FILE---`)
-      .join("\n\n"),
-    warnings,
-  }
-}
-
-function aggregateRepairSectionCap(maxContextSize: number | undefined): number {
-  const { maxCtx } = computeContextBudget(maxContextSize)
-  return Math.max(4_000, Math.floor(maxCtx * 0.12))
-}
-
-function isAggregateRepairSafe(
-  path: string,
-  index: string,
-  overview: string,
-  maxContextSize: number | undefined,
-): boolean {
-  const cap = aggregateRepairSectionCap(maxContextSize)
-  if (path === "wiki/index.md") return index.length <= cap
-  if (path === "wiki/overview.md") return overview.length <= cap
-  return true
 }
 
 function isValidSourceReference(source: string, activeSourceIdentity: string): boolean {
@@ -2329,62 +2227,6 @@ function buildReviewSuggestionPrompt(
     trimLongText(sourceContext, sectionCap),
     "",
     "## Generated Wiki Output",
-    trimLongText(generation, sectionCap),
-  ].filter(Boolean).join("\n")
-}
-
-function buildAggregateRepairPrompt(
-  paths: string[],
-  purpose: string,
-  index: string,
-  overview: string,
-  sourceIdentity: string,
-  analysis: string,
-  sourceContext: string,
-  generation: string,
-  maxContextSize: number | undefined,
-): string {
-  const sectionCap = aggregateRepairSectionCap(maxContextSize)
-  const today = currentWikiDate()
-  return [
-    "You are repairing aggregate wiki files after an ingest generation.",
-    "Do not output chain-of-thought, hidden reasoning, or explanatory preamble.",
-    "",
-    languageRule(sourceContext),
-    "",
-    "Generate ONLY the requested aggregate FILE blocks listed below.",
-    "Do not generate entity, concept, source summary, query, comparison, or synthesis pages.",
-    "",
-    "Requested paths:",
-    ...paths.map((path) => `- ${path}`),
-    "",
-    "Rules:",
-    `- Use today's date ${today} for log entries and frontmatter dates.`,
-    "- For wiki/index.md: output the complete updated index, preserving existing entries and adding the new source-derived entries.",
-    "- For wiki/overview.md: output the complete updated overview, reflecting the full wiki plus this new source.",
-    "- For wiki/log.md: output only the new log entry to append, format `## [YYYY-MM-DD] ingest | Title`.",
-    "- Output only FILE blocks. Nothing else.",
-    "",
-    "FILE block template:",
-    "```",
-    "---FILE: wiki/path.md---",
-    "(complete file content, or just the new log entry for wiki/log.md)",
-    "---END FILE---",
-    "```",
-    "",
-    purpose ? `## Wiki Purpose\n${trimLongText(purpose, Math.floor(sectionCap * 0.5))}` : "",
-    index ? `## Current Wiki Index\n${trimLongText(index, sectionCap)}` : "",
-    overview ? `## Current Overview\n${trimLongText(overview, sectionCap)}` : "",
-    "",
-    `## Source\n${sourceIdentity}`,
-    "",
-    "## Stage 1 Analysis",
-    trimLongText(analysis, sectionCap),
-    "",
-    "## Source Context",
-    trimLongText(sourceContext, sectionCap),
-    "",
-    "## First Generation Output",
     trimLongText(generation, sectionCap),
   ].filter(Boolean).join("\n")
 }

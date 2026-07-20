@@ -344,6 +344,8 @@
     "title": "Wiki 检查",
     "semantic": "语义检查 (LLM)",
     "running": "检查中...",
+    "cancel": "取消检查",
+    "cancelProgress": "取消 {{completed}}/{{total}}",
     "runLint": "开始检查",
     "runLintHint": "运行检查以诊断 Wiki 健康状况",
     "runLintDescription": "检查孤立页面、失效链接等问题",
