@@ -169,6 +169,16 @@ fn read_cache(original: &Path) -> Option<String> {
     }
 }
 
+/// Return a fresh preprocessing cache for Agent source retrieval.
+///
+/// Binary imports remain the referenced source of record; this helper only
+/// exposes their text extraction and never causes parsing or cache writes from
+/// a search request. Keeping freshness checks here also prevents the Agent
+/// from quoting a cache after the original file changed externally.
+pub(crate) fn read_preprocessed_cache(original: &Path) -> Option<String> {
+    read_cache(original)
+}
+
 fn write_cache(original: &Path, text: &str) -> Result<(), String> {
     let cache_path = cache_path_for(original);
     if let Some(parent) = cache_path.parent() {

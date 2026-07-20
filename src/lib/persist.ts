@@ -300,5 +300,5 @@ function normalizePersistedAgentMode(value: unknown): ChatAgentMode {
 }
 
 function normalizePersistedRetrievalMode(value: unknown): ChatRetrievalMode {
-  return value === "smart" ? "smart" : "standard"
+  return value === "smart" || value === "faithful" ? value : "standard"
 }

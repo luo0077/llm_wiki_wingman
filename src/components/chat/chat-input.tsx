@@ -28,7 +28,7 @@ export interface ChatSendOptions {
 }
 
 const AGENT_MODE_OPTIONS: ChatAgentMode[] = ["fast", "standard", "deep", "local_first"]
-const RETRIEVAL_MODE_OPTIONS: ChatRetrievalMode[] = ["standard", "smart"]
+const RETRIEVAL_MODE_OPTIONS: ChatRetrievalMode[] = ["standard", "smart", "faithful"]
 
 export interface ChatSkillOption {
   id: string
@@ -834,9 +834,7 @@ export function ChatInput({
                         : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
                     } disabled:pointer-events-none disabled:opacity-50`}
                   >
-                    {retrieval === "smart"
-                      ? t("chat.retrievalModes.smart")
-                      : t("chat.retrievalModes.standard")}
+                    {t(`chat.retrievalModes.${retrieval}`)}
                   </button>
                 )
               })}
