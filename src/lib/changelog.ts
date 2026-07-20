@@ -26,6 +26,34 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.6.5",
+    date: "2026-07-20",
+    highlights: {
+      en: [
+        "Added project-specific model configuration, including separate model routing for Chat and Ingest tasks.",
+        "Added multiple custom LLM providers, custom request headers, and a configurable streaming output option.",
+        "Added batch URL import and native Org mode source ingestion.",
+        "Added a Read Sources Only answer mode that grounds responses exclusively in original source material.",
+        "Improved embedding indexing performance and wiki-link repair for large projects.",
+        "Bound MCP sessions to their projects to prevent context from leaking between projects.",
+        "Added secure LAN support and customizable keyboard shortcuts to the Chrome Clipper.",
+        "Made Chat retrieval modes and Agent depth modes more compact and easier to switch.",
+        "Improved existing features and fixed stability, compatibility, and error-handling issues.",
+      ],
+      zh: [
+        "新增项目级模型配置，并支持 Chat、Ingest 等任务使用不同模型。",
+        "支持创建和切换多个自定义 LLM Provider，并新增自定义请求头和流式输出开关。",
+        "新增批量 URL 导入与 Org mode 文件摄取。",
+        "新增“只读原文”回答模式，仅依据原始资料提供答案。",
+        "优化 Embedding 索引速度和大项目 Wiki 链接修复性能。",
+        "MCP 会话与具体项目绑定，避免跨项目上下文混用。",
+        "Chrome 剪藏支持安全 LAN 连接与可自定义快捷键。",
+        "Chat 检索模式和 Agent 深度模式改为更紧凑的选择方式。",
+        "优化现有功能，并修复稳定性、兼容性和错误处理问题。",
+      ],
+    },
+  },
+  {
     version: "0.6.4",
     date: "2026-07-16",
     highlights: {
