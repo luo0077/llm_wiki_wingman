@@ -1152,7 +1152,10 @@ impl AgentRuntime {
             }
         }
         let retrieval_summary = retrieval_parts.join("\n\n");
-        let project_context = load_project_context(&self.project_path);
+        let project_context = project_context_for_retrieval_mode(
+            load_project_context(&self.project_path),
+            request.retrieval_mode,
+        );
         let explicit_files =
             load_explicit_context_files(&self.project_path, &request.context_files).await;
         let built_context = fit_context_to_model(
@@ -1310,7 +1313,10 @@ impl AgentRuntime {
             .ok_or_else(|| "Backend Agent LLM is not configured".to_string())?;
         let client = LlmClient::new(config.clone())?
             .structured_task_config(agent_structured_max_tokens(!skills.is_empty()));
-        let project_context = load_project_context(&self.project_path);
+        let project_context = project_context_for_retrieval_mode(
+            load_project_context(&self.project_path),
+            request.retrieval_mode,
+        );
         let explicit_files =
             load_explicit_context_files(&self.project_path, &request.context_files).await;
         if !request.context_files.is_empty() {
@@ -2772,6 +2778,21 @@ fn should_plan_tools_with_model(
     }
     let has_available_tool = tools.wiki || tools.web || tools.anytxt || skills_enabled;
     !message.trim().is_empty() && has_available_tool
+}
+
+fn project_context_for_retrieval_mode(
+    mut project: super::context::ProjectContext,
+    retrieval_mode: AgentRetrievalMode,
+) -> super::context::ProjectContext {
+    if retrieval_mode == AgentRetrievalMode::Faithful {
+        // Faithful-source mode must enforce its evidence boundary before prompt
+        // construction. overview.md is generated knowledge, and schema.md can
+        // contain domain descriptions; asking the model to ignore either would
+        // be a soft guarantee rather than source-only context isolation.
+        project.overview = None;
+        project.schema = None;
+    }
+    project
 }
 
 fn agent_loop_iteration_budget(mode: AgentMode, has_skills: bool) -> usize {
@@ -4694,6 +4715,45 @@ mod tests {
         assert!(!loop_user.contains("- wiki.search:"));
         assert!(!loop_user.contains("- graph.search:"));
         assert!(final_system.contains("Faithful-source mode remains in force"));
+    }
+
+    #[test]
+    fn faithful_retrieval_removes_ambient_generated_project_context() {
+        let project = crate::agent::context::ProjectContext {
+            overview: Some("generated overview evidence".to_string()),
+            schema: Some("domain schema evidence".to_string()),
+            agent_workspace: "/project/agent-workspace".to_string(),
+        };
+
+        let faithful =
+            project_context_for_retrieval_mode(project.clone(), AgentRetrievalMode::Faithful);
+        let standard =
+            project_context_for_retrieval_mode(project.clone(), AgentRetrievalMode::Standard);
+
+        assert!(faithful.overview.is_none());
+        assert!(faithful.schema.is_none());
+        assert_eq!(faithful.agent_workspace, project.agent_workspace);
+        assert_eq!(standard, project);
+
+        let router = route_query(
+            "quote the original",
+            AgentMode::Standard,
+            &AgentToolOptions::default(),
+        );
+        let built = build_agent_context(AgentContextInput {
+            query: "quote the original",
+            project: &faithful,
+            router: &router,
+            history: &[],
+            skills: &[],
+            skill_mode: AgentSkillMode::Auto,
+            references: &[],
+            retrieval_summary: "",
+            explicit_files: &[],
+        });
+        assert!(!built.system.contains("generated overview evidence"));
+        assert!(!built.system.contains("domain schema evidence"));
+        assert!(built.system.contains("/project/agent-workspace"));
     }
 
     #[test]
