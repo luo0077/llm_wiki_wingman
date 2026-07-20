@@ -6,24 +6,64 @@ const urlPreview = document.getElementById("urlPreview");
 const contentPreview = document.getElementById("contentPreview");
 const clipBtn = document.getElementById("clipBtn");
 const projectSelect = document.getElementById("projectSelect");
+const serverUrlInput = document.getElementById("serverUrlInput");
+const accessTokenInput = document.getElementById("accessTokenInput");
+const saveConnectionBtn = document.getElementById("saveConnectionBtn");
+const connectionSettings = document.getElementById("connectionSettings");
 
 let extractedContent = "";
 let pageUrl = "";
 let apiUrl = API_URLS[0];
+let accessToken = "";
+
+function normalizeServerUrl(value) {
+  let candidate = String(value || "").trim();
+  if (!candidate) return API_URLS[0];
+  if (!/^https?:\/\//i.test(candidate)) candidate = `http://${candidate}`;
+  const parsed = new URL(candidate);
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error("Use an http(s) address without embedded credentials");
+  }
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("Enter only the server origin, without a path, query, or fragment");
+  }
+  if (!parsed.port) parsed.port = "19827";
+  return parsed.origin;
+}
+
+async function loadConnectionSettings() {
+  const saved = await chrome.storage.local.get(["serverUrl", "accessToken"]);
+  try {
+    apiUrl = normalizeServerUrl(saved.serverUrl || API_URLS[0]);
+  } catch {
+    apiUrl = API_URLS[0];
+    connectionSettings.open = true;
+  }
+  accessToken = String(saved.accessToken || "");
+  serverUrlInput.value = apiUrl;
+  accessTokenInput.value = accessToken;
+}
+
+function requestHeaders(options) {
+  const headers = new Headers(options?.headers || {});
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  return headers;
+}
 
 async function clipFetch(path, options) {
   const method = String(options?.method || "GET").toUpperCase();
   // Only retry idempotent reads across host aliases. Retrying POST /clip can
   // duplicate a clip if the server handled the first request but the response
   // failed before the extension received it.
-  const urls = method === "GET"
+  const isDefaultLocalAddress = API_URLS.includes(apiUrl);
+  const urls = method === "GET" && isDefaultLocalAddress
     ? [apiUrl, ...API_URLS.filter((url) => url !== apiUrl)]
     : [apiUrl];
   let lastError;
 
   for (const baseUrl of urls) {
     try {
-      const res = await fetch(`${baseUrl}${path}`, options);
+      const res = await fetch(`${baseUrl}${path}`, { ...options, headers: requestHeaders(options) });
       apiUrl = baseUrl;
       return res;
     } catch (err) {
@@ -35,18 +75,25 @@ async function clipFetch(path, options) {
 }
 
 async function checkConnection() {
+  let connectionError = "";
   try {
     const res = await clipFetch("/status", { method: "GET" });
     const data = await res.json();
+    if (res.status === 401) throw new Error("Access token required or invalid");
     if (data.ok) {
       statusBar.className = "status connected";
       statusBar.textContent = "✓ Connected to LLM Wiki";
       await loadProjects();
       return true;
     }
-  } catch {}
+  } catch (err) {
+    connectionError = err?.message || "";
+  }
   statusBar.className = "status disconnected";
-  statusBar.textContent = "✗ LLM Wiki app is not running";
+  statusBar.textContent = connectionError.includes("token")
+    ? "✗ Access token required or invalid"
+    : "✗ Cannot connect to LLM Wiki"
+  statusBar.title = connectionError;
   clipBtn.disabled = true;
   projectSelect.innerHTML = '<option value="">App not running</option>';
   return false;
@@ -268,6 +315,25 @@ async function sendClip() {
 
 clipBtn.addEventListener("click", sendClip);
 
+saveConnectionBtn.addEventListener("click", async () => {
+  try {
+    const nextUrl = normalizeServerUrl(serverUrlInput.value);
+    const originPattern = `${new URL(nextUrl).origin}/*`;
+    const granted = await chrome.permissions.request({ origins: [originPattern] });
+    if (!granted) throw new Error("Host permission was not granted");
+    apiUrl = nextUrl;
+    accessToken = accessTokenInput.value.trim();
+    await chrome.storage.local.set({ serverUrl: apiUrl, accessToken });
+    connectionSettings.open = false;
+    clipBtn.disabled = true;
+    await checkConnection();
+  } catch (err) {
+    connectionSettings.open = true;
+    statusBar.className = "status error";
+    statusBar.textContent = `✗ ${err.message}`;
+  }
+});
+
 // Resize content preview to fill available space without causing popup scroll
 function resizePreview() {
   const totalHeight = 500; // matches html/body height
@@ -282,6 +348,7 @@ function resizePreview() {
 }
 
 (async () => {
+  await loadConnectionSettings();
   const connected = await checkConnection();
   // Always extract content so user can preview, even if app not running
   await extractContent();

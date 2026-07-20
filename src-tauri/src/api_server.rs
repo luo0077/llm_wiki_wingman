@@ -431,7 +431,11 @@ fn is_authorized(app: &AppHandle, query: &str, headers: &[(String, String)]) -> 
     is_token_authorized(app, query, headers)
 }
 
-fn is_token_authorized(app: &AppHandle, query: &str, headers: &[(String, String)]) -> bool {
+pub(crate) fn is_token_authorized(
+    app: &AppHandle,
+    query: &str,
+    headers: &[(String, String)],
+) -> bool {
     let Some(token) = api_token(app) else {
         return false;
     };
