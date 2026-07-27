@@ -127,6 +127,10 @@ describe("getRelativePath", () => {
     expect(getRelativePath("//server/SHARE/sub/file.md", "//SERVER/share")).toBe("sub/file.md")
   })
 
+  it("does not derive the relative offset from case-folded character length", () => {
+    expect(getRelativePath("c:/i\u0307/sub/file.md", "C:/\u0130")).toBe("sub/file.md")
+  })
+
   it("keeps Unix paths case-sensitive", () => {
     expect(getRelativePath("/Project/wiki/note.md", "/project")).toBe("/Project/wiki/note.md")
   })

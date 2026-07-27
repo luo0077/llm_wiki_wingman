@@ -50,7 +50,10 @@ export function getRelativePath(fullPath: string, basePath: string): string {
   const fullKey = caseFoldPath(normalFull)
   const baseKey = caseFoldPath(normalBase)
   if (fullKey.startsWith(baseKey + "/")) {
-    return normalFull.slice(normalBase.length + 1)
+    // Slice by path segments rather than the original string length. Unicode
+    // case folding can change UTF-16 length, so an offset derived from the
+    // differently-cased base can split the returned relative path incorrectly.
+    return normalFull.split("/").slice(normalBase.split("/").length).join("/")
   }
   return normalFull
 }
