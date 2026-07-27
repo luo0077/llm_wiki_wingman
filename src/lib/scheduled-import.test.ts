@@ -235,6 +235,43 @@ describe("scanAndImport failure handling", () => {
     expect(mocks.writeFileAtomic).not.toHaveBeenCalled()
   })
 
+  it("reuses legacy mixed-case Windows database keys after upgrade", async () => {
+    const windowsProject: WikiProject = {
+      id: "windows-project",
+      name: "Windows Project",
+      path: "C:/Users/Me/Wiki",
+    }
+    useWikiStore.setState({ project: windowsProject })
+    mocks.fileExists.mockResolvedValue(true)
+    mocks.readFile.mockResolvedValue(JSON.stringify({
+      version: 1,
+      directories: {
+        "C:/Users/Me/Inbox": {
+          files: {
+            "C:/Users/Me/Inbox/Paper.pdf": "md5-new",
+          },
+          lastScan: 123,
+        },
+      },
+    }))
+    mocks.listDirectory.mockResolvedValue([
+      {
+        name: "Paper.pdf",
+        path: "c:/users/me/inbox/paper.pdf",
+        is_dir: false,
+      },
+    ])
+
+    await scanAndImport(windowsProject, "c:/users/me/inbox")
+
+    expect(mocks.copyFile).not.toHaveBeenCalled()
+    expect(mocks.enqueueSourceIngest).not.toHaveBeenCalled()
+    expect(mocks.writeFileAtomic).toHaveBeenCalledWith(
+      "C:/Users/Me/Wiki/.llm-wiki/scheduled-import-db.json",
+      expect.stringContaining('"c:/users/me/inbox/paper.pdf": "md5-new"'),
+    )
+  })
+
   it("does not leave the scanner locked after a managed project path is skipped", async () => {
     await scanAndImport(project, `${project.path}/raw/sources`)
     await scanAndImport(project, "/Users/me/inbox")
