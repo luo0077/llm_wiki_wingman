@@ -947,7 +947,10 @@
     "historyRestore": "Restore this version",
     "pdfText": "Text",
     "pdfDocument": "PDF",
-    "pdfPage": "Page"
+    "pdfPage": "Page",
+    "pdfLoading": "Loading PDF...",
+    "pdfLoadError": "The PDF could not be rendered. You can retry or open it with the system app.",
+    "pdfTooLarge": "This PDF is too large for the in-app preview. Open it with the system app."
   },
   "activity": {
     "processing": "Processing: {{title}}",
