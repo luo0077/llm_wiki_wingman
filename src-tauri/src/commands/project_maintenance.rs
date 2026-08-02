@@ -93,6 +93,30 @@ mod tests {
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(sibling);
     }
+
+    #[test]
+    fn export_uses_the_resolved_destination_path() {
+        let source = temp("export-resolved-source");
+        let destination_dir = temp("export-resolved-target");
+        fs::create_dir_all(source.join("wiki")).unwrap();
+        fs::create_dir_all(&destination_dir).unwrap();
+        fs::write(source.join("wiki/index.md"), "# Index").unwrap();
+
+        let destination = destination_dir
+            .join("..")
+            .join(destination_dir.file_name().unwrap())
+            .join("archive.zip");
+        let resolved = destination_dir.canonicalize().unwrap().join("archive.zip");
+        export_project_archive_inner(
+            source.to_string_lossy().into_owned(),
+            destination.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+
+        assert!(resolved.is_file());
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination_dir);
+    }
 }
 
 #[tauri::command]
@@ -135,8 +159,10 @@ fn export_project_archive_inner(project_path: String, destination: String) -> Re
     let root = PathBuf::from(&project_path)
         .canonicalize()
         .map_err(|e| e.to_string())?;
-    let output = PathBuf::from(destination);
-    resolve_export_destination(&root, &output)?;
+    // Use the same canonical destination that passed containment validation.
+    // Reusing the unresolved input would separate the checked path from the
+    // path opened for writing and retain avoidable traversal/TOCTOU surface.
+    let output = resolve_export_destination(&root, &PathBuf::from(destination))?;
     let file = File::create(&output).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);

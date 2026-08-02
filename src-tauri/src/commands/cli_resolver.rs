@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
+#[cfg(not(windows))]
 use std::time::Duration;
 
+#[cfg(not(windows))]
 const LOGIN_SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(not(windows))]
 const PATH_MARKER: char = '\x1e';
 
 static RESOLVED_COMMANDS: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
