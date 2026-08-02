@@ -106,6 +106,29 @@ export function SourceWatchSection({ draft, setDraft, projectReady }: Props) {
           </div>
         </label>
 
+        <label className="block space-y-1.5">
+          <span className="text-sm font-semibold">
+            {t("settings.sections.sourceWatch.parsingConcurrency", {
+              defaultValue: "Concurrent document parsers",
+            })}
+          </span>
+          <input
+            type="number"
+            min={1}
+            max={8}
+            value={config.parsingConcurrency}
+            onChange={(event) => updateConfig({ parsingConcurrency: Number(event.target.value) || 1 })}
+            disabled={!projectReady}
+            className="w-24 rounded-md border border-input bg-background px-2 py-1 text-sm"
+          />
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {t("settings.sections.sourceWatch.parsingConcurrencyDescription", {
+              defaultValue:
+                "Parse up to this many imported documents at once before sequential Wiki generation. PDF parsing remains internally serialized for safety.",
+            })}
+          </p>
+        </label>
+
         <label className="flex items-start gap-3">
           <input
             type="checkbox"

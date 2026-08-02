@@ -704,6 +704,8 @@
         "autoIngestDescription": "When disabled, external changes still refresh the file tree but do not create ingest tasks.",
         "persistExtractedMarkdown": "Keep parsed Markdown",
         "persistExtractedMarkdownDescription": "Save extracted document text under raw/parsed using the same folder structure as raw/sources.",
+        "parsingConcurrency": "Concurrent document parsers",
+        "parsingConcurrencyDescription": "Parse up to this many imported documents at once before sequential Wiki generation. PDF parsing remains internally serialized for safety.",
         "noProject": "Open a project to change this project-level setting.",
         "fileTypes": "Allowed file types",
         "fileTypesDescription": "Document types are enabled by default. Media, binaries, source code, and config-like formats stay off unless selected.",
