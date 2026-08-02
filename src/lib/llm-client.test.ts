@@ -130,6 +130,39 @@ describe("streamChat — buffered streaming responses", () => {
     expect(onDone).not.toHaveBeenCalled()
   })
 
+  it("cancels a still-open response body after an SSE endpoint error", async () => {
+    let bodyCancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          'data: {"error":{"message":"stream failed"}}\n',
+        ))
+      },
+      cancel() {
+        bodyCancelled = true
+      },
+    })
+    mockHttpFetch.mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }))
+    const onToken = vi.fn()
+    const onDone = vi.fn()
+    const onError = vi.fn()
+
+    await streamChat(
+      customStreamingCfg,
+      [{ role: "user", content: "hi" }],
+      { onToken, onDone, onError },
+    )
+
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0][0].message).toBe("LLM endpoint error: stream failed")
+    expect(bodyCancelled).toBe(true)
+    expect(onToken).not.toHaveBeenCalled()
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
   it("parses every record from a fully buffered SSE body", async () => {
     const body = [
       openAiSseToken("Hello"),

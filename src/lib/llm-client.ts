@@ -359,6 +359,17 @@ export async function streamChat(
     }
     return parseEndpointErrorEnvelope(trimmed)
   }
+  const stopForEndpointError = async (error: Error) => {
+    // An endpoint can emit an error event without closing its SSE response.
+    // Cancel the body so that the transport does not keep the connection and
+    // its buffers alive after the caller has already received the failure.
+    try {
+      await reader.cancel()
+    } catch {
+      // Preserve the endpoint's actionable error if transport cleanup fails.
+    }
+    onError(error)
+  }
 
   try {
     while (true) {
@@ -369,7 +380,7 @@ export async function streamChat(
         for (const line of splitFinalStreamRecords(finalText)) {
           const endpointError = processRecord(line)
           if (endpointError) {
-            onError(endpointError)
+            await stopForEndpointError(endpointError)
             return
           }
         }
@@ -382,7 +393,7 @@ export async function streamChat(
       for (const line of lines) {
         const endpointError = processRecord(line)
         if (endpointError) {
-          onError(endpointError)
+          await stopForEndpointError(endpointError)
           return
         }
       }
