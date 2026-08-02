@@ -2,12 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   createDirectory: vi.fn(),
+  deleteFile: vi.fn(),
+  readFile: vi.fn(),
   writeFileAtomic: vi.fn(),
 }))
 
 vi.mock("@/commands/fs", () => mocks)
 
-import { parsedMarkdownOutputPath, persistParsedMarkdown } from "./parsed-source-output"
+import {
+  moveParsedMarkdown,
+  parsedMarkdownOutputPath,
+  persistParsedMarkdown,
+  removeParsedMarkdown,
+} from "./parsed-source-output"
 
 describe("parsed source output", () => {
   beforeEach(() => vi.clearAllMocks())
@@ -19,6 +26,8 @@ describe("parsed source output", () => {
     expect(
       parsedMarkdownOutputPath("C:\\Project", "c:\\project\\raw\\sources\\A.DOCX"),
     ).toBe("C:/Project/raw/parsed/A.DOCX.md")
+    expect(parsedMarkdownOutputPath("/project", "raw/sources/a.pdf"))
+      .toBe("/project/raw/parsed/a.pdf.md")
   })
 
   it("rejects sources outside the project and formats that are already text", () => {
@@ -40,5 +49,27 @@ describe("parsed source output", () => {
       "/project/raw/parsed/nested/report.pdf.md",
       "# Parsed",
     )
+  })
+
+  it("removes and moves generated copies with their source lifecycle", async () => {
+    mocks.readFile.mockResolvedValue("# Parsed")
+
+    await removeParsedMarkdown("/project", "/project/raw/sources/old/report.pdf")
+    expect(mocks.deleteFile).toHaveBeenCalledWith(
+      "/project/raw/parsed/old/report.pdf.md",
+    )
+
+    mocks.deleteFile.mockClear()
+    await moveParsedMarkdown(
+      "/project",
+      "/project/raw/sources/old/report.pdf",
+      "/project/raw/sources/new/report.pdf",
+    )
+    expect(mocks.readFile).toHaveBeenCalledWith("/project/raw/parsed/old/report.pdf.md")
+    expect(mocks.writeFileAtomic).toHaveBeenCalledWith(
+      "/project/raw/parsed/new/report.pdf.md",
+      "# Parsed",
+    )
+    expect(mocks.deleteFile).toHaveBeenCalledWith("/project/raw/parsed/old/report.pdf.md")
   })
 })

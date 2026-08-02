@@ -960,7 +960,7 @@ fn apply_anthropic_reasoning(body: &mut Value, config: &LlmConfig) {
     let Some(budget) = reasoning_budget(reasoning) else {
         return;
     };
-    if is_claude_47_or_later(&config.model) {
+    if is_claude_46_or_later(&config.model) {
         let effort = match reasoning.mode.as_deref() {
             Some("low") => "low",
             Some("medium") => "medium",
@@ -1001,14 +1001,14 @@ fn apply_google_reasoning(body: &mut Value, config: &LlmConfig) {
     }
 }
 
-fn is_claude_47_or_later(model: &str) -> bool {
+fn is_claude_46_or_later(model: &str) -> bool {
     let lower = model.to_ascii_lowercase();
     ["claude-opus-4-", "claude-sonnet-4-", "claude-haiku-4-"]
         .iter()
         .find_map(|prefix| lower.strip_prefix(prefix))
         .and_then(|tail| tail.split(['-', '_', '.']).next())
         .and_then(|version| version.parse::<u32>().ok())
-        .is_some_and(|version| version >= 7)
+        .is_some_and(|version| version >= 6)
 }
 
 fn is_openai_reasoning_model(config: &LlmConfig) -> bool {
@@ -1025,7 +1025,10 @@ fn is_openai_reasoning_model(config: &LlmConfig) -> bool {
 
 fn is_gemini_3(model: &str) -> bool {
     let lower = model.to_ascii_lowercase();
-    lower.starts_with("gemini-3-") || lower.starts_with("gemini_3_")
+    lower.starts_with("gemini-3-")
+        || lower.starts_with("gemini-3.")
+        || lower.starts_with("gemini_3_")
+        || lower.starts_with("gemini_3.")
 }
 
 fn is_gemini_thinking_required(model: &str) -> bool {
@@ -1264,6 +1267,39 @@ mod tests {
         assert_eq!(
             body.get("output_config"),
             Some(&json!({ "effort": "high" }))
+        );
+    }
+
+    #[test]
+    fn claude_46_uses_adaptive_thinking() {
+        let mut cfg = config("anthropic");
+        cfg.model = "claude-sonnet-4-6".to_string();
+        cfg.reasoning = Some(LlmReasoningConfig {
+            mode: Some("medium".to_string()),
+            budget_tokens: None,
+        });
+        let client = LlmClient::new(cfg).unwrap();
+        let body = client.anthropic_like_body("system", "user", &[], false);
+        assert_eq!(body.get("thinking"), Some(&json!({ "type": "adaptive" })));
+        assert_eq!(
+            body.get("output_config"),
+            Some(&json!({ "effort": "medium" }))
+        );
+    }
+
+    #[test]
+    fn gemini_35_uses_thinking_level() {
+        let mut cfg = config("google");
+        cfg.model = "gemini-3.5-flash".to_string();
+        cfg.reasoning = Some(LlmReasoningConfig {
+            mode: Some("medium".to_string()),
+            budget_tokens: None,
+        });
+        let client = LlmClient::new(cfg).unwrap();
+        let body = client.google_body("system", "user", &[]);
+        assert_eq!(
+            body["generationConfig"].get("thinkingConfig"),
+            Some(&json!({ "thinkingLevel": "medium" }))
         );
     }
 

@@ -25,6 +25,8 @@ describe("reasoning capabilities", () => {
       .not.toContain("off")
     expect(resolveReasoningCapabilities(config("anthropic", "claude-opus-4-7")).modes)
       .not.toContain("off")
+    expect(resolveReasoningCapabilities(config("anthropic", "claude-sonnet-4-6")).modes)
+      .not.toContain("custom")
   })
 
   it("limits OpenAI reasoning models to representable effort levels", () => {

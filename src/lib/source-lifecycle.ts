@@ -40,6 +40,7 @@ import { naturalCompare } from "@/lib/natural-sort"
 import type { SourceWatchConfig } from "@/stores/wiki-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { preprocessSourceFiles } from "@/lib/source-preprocess"
+import { moveParsedMarkdown, removeParsedMarkdown } from "@/lib/parsed-source-output"
 
 export const INGESTABLE_SOURCE_EXTENSIONS = new Set([
   "md",
@@ -194,6 +195,11 @@ export async function migrateSourcePath(
       summaryMoves.set(oldSummaryRel, newSummaryRel)
     }
     await moveIngestCacheEntry(pp, oldIdentity, newIdentity, summaryMoves)
+    try {
+      await moveParsedMarkdown(pp, oldSourcePath, newSourcePath)
+    } catch (err) {
+      console.warn("[source-lifecycle] failed to move optional parsed Markdown:", err)
+    }
     return writes.length
   } catch (err) {
     if (newSummaryCreated) {
@@ -243,6 +249,11 @@ export async function enqueueSourceIngest(
   llmConfig: LlmConfig,
   options: { sourceRoot?: string; rootContext?: string; parsingConcurrency?: number } = {},
 ): Promise<string[]> {
+  // Extraction can be expensive (OCR and Office parsers in particular).
+  // Do not parse a batch that cannot proceed to ingest because no usable
+  // model is configured. Imported source files remain on disk and can be
+  // queued after the user configures a provider.
+  if (!hasUsableLlm(getTaskLlmConfig("ingest", llmConfig))) return []
   const files = sourcePaths
     .filter((sourcePath) =>
       isIngestableSourcePath(sourcePath) &&
@@ -259,7 +270,6 @@ export async function enqueueSourceIngest(
   const parsingConcurrency = options.parsingConcurrency
     ?? normalizeSourceWatchConfig(useWikiStore.getState().sourceWatchConfig).parsingConcurrency
   await preprocessSourceFiles(files.map((file) => file.sourcePath), parsingConcurrency)
-  if (!hasUsableLlm(getTaskLlmConfig("ingest", llmConfig))) return []
   return enqueueBatch(project.id, files)
 }
 
@@ -415,6 +425,7 @@ export async function deleteSourceFiles(
   }
 
   for (const info of sourceInfos) {
+    await removeParsedMarkdown(pp, info.source)
     try {
       await deleteFile(`${pp}/raw/sources/.cache/${info.fileName}.txt`)
     } catch {
