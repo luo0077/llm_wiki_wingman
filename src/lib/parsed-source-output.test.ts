@@ -1,0 +1,44 @@
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const mocks = vi.hoisted(() => ({
+  createDirectory: vi.fn(),
+  writeFileAtomic: vi.fn(),
+}))
+
+vi.mock("@/commands/fs", () => mocks)
+
+import { parsedMarkdownOutputPath, persistParsedMarkdown } from "./parsed-source-output"
+
+describe("parsed source output", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("mirrors nested source paths without dropping the original extension", () => {
+    expect(
+      parsedMarkdownOutputPath("/project", "/project/raw/sources/reports/a.pdf"),
+    ).toBe("/project/raw/parsed/reports/a.pdf.md")
+    expect(
+      parsedMarkdownOutputPath("C:\\Project", "c:\\project\\raw\\sources\\A.DOCX"),
+    ).toBe("C:/Project/raw/parsed/A.DOCX.md")
+  })
+
+  it("rejects sources outside the project and formats that are already text", () => {
+    expect(parsedMarkdownOutputPath("/project", "/other/report.pdf")).toBeNull()
+    expect(parsedMarkdownOutputPath("/project", "/project/raw/sources/note.md")).toBeNull()
+    expect(parsedMarkdownOutputPath("/project", "/project/raw/sources/data.json")).toBeNull()
+  })
+
+  it("creates the mirrored directory and writes atomically", async () => {
+    await expect(
+      persistParsedMarkdown(
+        "/project",
+        "/project/raw/sources/nested/report.pdf",
+        "# Parsed",
+      ),
+    ).resolves.toBe("/project/raw/parsed/nested/report.pdf.md")
+    expect(mocks.createDirectory).toHaveBeenCalledWith("/project/raw/parsed/nested")
+    expect(mocks.writeFileAtomic).toHaveBeenCalledWith(
+      "/project/raw/parsed/nested/report.pdf.md",
+      "# Parsed",
+    )
+  })
+})

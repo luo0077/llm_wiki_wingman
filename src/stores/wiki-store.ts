@@ -259,6 +259,8 @@ export interface GeneralConfig {
 interface SourceWatchConfig {
   enabled: boolean
   autoIngest: boolean
+  /** Keep extractor output in raw/parsed in addition to the internal cache. */
+  persistExtractedMarkdown: boolean
   includeExtensions: string[]
   excludeExtensions: string[]
   excludeDirs: string[]

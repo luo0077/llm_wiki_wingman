@@ -109,6 +109,29 @@ export function SourceWatchSection({ draft, setDraft, projectReady }: Props) {
         <label className="flex items-start gap-3">
           <input
             type="checkbox"
+            checked={config.persistExtractedMarkdown}
+            onChange={(event) => updateConfig({ persistExtractedMarkdown: event.target.checked })}
+            disabled={!projectReady}
+            className="mt-1 h-4 w-4"
+          />
+          <div className="space-y-1">
+            <span className="text-sm font-semibold">
+              {t("settings.sections.sourceWatch.persistExtractedMarkdown", {
+                defaultValue: "Keep parsed Markdown",
+              })}
+            </span>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {t("settings.sections.sourceWatch.persistExtractedMarkdownDescription", {
+                defaultValue:
+                  "Save extracted document text under raw/parsed using the same folder structure as raw/sources.",
+              })}
+            </p>
+          </div>
+        </label>
+
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
             checked={config.autoIngest}
             onChange={(event) => updateConfig({ autoIngest: event.target.checked })}
             disabled={!projectReady || !config.enabled}

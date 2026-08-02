@@ -94,6 +94,7 @@ describe("source-lifecycle path helpers", () => {
       {
         enabled: true,
         autoIngest: true,
+        persistExtractedMarkdown: false,
         includeExtensions: ["md"],
         excludeExtensions: ["json"],
         excludeDirs: ["drafts"],
@@ -153,6 +154,7 @@ describe("source-lifecycle path helpers", () => {
       {
         enabled: true,
         autoIngest: true,
+        persistExtractedMarkdown: false,
         includeExtensions: ["json", "yaml", "md"],
         excludeExtensions: [],
         excludeDirs: [],
@@ -221,6 +223,7 @@ describe("source-lifecycle path helpers", () => {
       {
         enabled: true,
         autoIngest: true,
+        persistExtractedMarkdown: false,
         includeExtensions: ["md"],
         excludeExtensions: [],
         excludeDirs: ["drafts"],
@@ -256,6 +259,7 @@ describe("source-lifecycle path helpers", () => {
       {
         enabled: true,
         autoIngest: true,
+        persistExtractedMarkdown: false,
         includeExtensions: ["md", "pdf"],
         excludeExtensions: [],
         excludeDirs: [],
@@ -319,6 +323,7 @@ describe("source-lifecycle path helpers", () => {
       {
         enabled: true,
         autoIngest: true,
+        persistExtractedMarkdown: false,
         includeExtensions: ["md"],
         excludeExtensions: [],
         excludeDirs: [],

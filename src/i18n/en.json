@@ -702,6 +702,8 @@
         "enableDescription": "Refreshes the Sources view and indexes allowed new or modified files under raw/sources.",
         "autoIngest": "Auto-ingest allowed source files",
         "autoIngestDescription": "When disabled, external changes still refresh the file tree but do not create ingest tasks.",
+        "persistExtractedMarkdown": "Keep parsed Markdown",
+        "persistExtractedMarkdownDescription": "Save extracted document text under raw/parsed using the same folder structure as raw/sources.",
         "noProject": "Open a project to change this project-level setting.",
         "fileTypes": "Allowed file types",
         "fileTypesDescription": "Document types are enabled by default. Media, binaries, source code, and config-like formats stay off unless selected.",

@@ -45,6 +45,8 @@ export function normalizeSourceWatchConfig(config?: Partial<SourceWatchConfig> |
   return {
     enabled: config?.enabled ?? DEFAULT_SOURCE_WATCH_CONFIG.enabled,
     autoIngest: config?.autoIngest ?? DEFAULT_SOURCE_WATCH_CONFIG.autoIngest,
+    persistExtractedMarkdown:
+      config?.persistExtractedMarkdown ?? DEFAULT_SOURCE_WATCH_CONFIG.persistExtractedMarkdown,
     includeExtensions: normalizeExtensions(config?.includeExtensions ?? DEFAULT_SOURCE_WATCH_CONFIG.includeExtensions),
     excludeExtensions: normalizeExtensions(config?.excludeExtensions ?? DEFAULT_SOURCE_WATCH_CONFIG.excludeExtensions),
     excludeDirs: normalizeList(config?.excludeDirs ?? DEFAULT_SOURCE_WATCH_CONFIG.excludeDirs),

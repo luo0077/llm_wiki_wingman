@@ -9,6 +9,10 @@ import sourceWatchDefaults from "@/lib/source-watch-defaults.json"
 describe("source watch config", () => {
   it("uses the shared default fixture", () => {
     expect(DEFAULT_SOURCE_WATCH_CONFIG).toEqual(sourceWatchDefaults)
+    expect(normalizeSourceWatchConfig({}).persistExtractedMarkdown).toBe(false)
+    expect(
+      normalizeSourceWatchConfig({ persistExtractedMarkdown: true }).persistExtractedMarkdown,
+    ).toBe(true)
   })
 
   it("allows document types by default and rejects config/media/binaries", () => {

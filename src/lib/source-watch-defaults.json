@@ -1,6 +1,7 @@
 {
   "enabled": true,
   "autoIngest": true,
+  "persistExtractedMarkdown": false,
   "includeExtensions": [
     "md",
     "mdx",
