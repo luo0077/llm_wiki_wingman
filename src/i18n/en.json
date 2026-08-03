@@ -107,6 +107,7 @@
     "synthesis": "Synthesis",
     "thinking": "Thinking",
     "open": "Open",
+    "retry": "Retry",
     "remove": "Remove",
     "status": {
       "queued": "Queued",

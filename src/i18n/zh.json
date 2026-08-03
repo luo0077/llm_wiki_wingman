@@ -107,6 +107,7 @@
     "synthesis": "综合结果",
     "thinking": "思考中",
     "open": "打开",
+    "retry": "重试",
     "remove": "移除",
     "status": {
       "queued": "排队中",
