@@ -56,21 +56,15 @@ function isTextInput(element: HTMLElement | null): boolean {
  * - Windows/Linux: Requires event.ctrlKey
  */
 function hasPlatformModifierKey(event: KeyboardEvent): boolean {
-  // Detect platform via user agent (Tauri sets this correctly)
-  const isMac = typeof navigator !== "undefined" && /Mac OS X/.test(navigator.userAgent)
-
-  if (isMac) {
-    return event.metaKey
-  } else {
-    return event.ctrlKey
-  }
+  // Reuse the platform class already set in main.tsx
+  const isMac = document.documentElement.classList.contains("platform-macos")
+  return isMac ? event.metaKey : event.ctrlKey
 }
 
 /**
  * Register global keyboard shortcuts.
  *
  * @param shortcuts - Map of key names to callback functions
- * @param deps - Optional dependency array to re-register shortcuts when values change
  *
  * Keys should be lowercase event.key values (e.g., "," for comma, "s" for S key).
  *
@@ -78,7 +72,7 @@ function hasPlatformModifierKey(event: KeyboardEvent): boolean {
  * - User is typing in a text input field
  * - User is composing text via IME (Chinese/Japanese/Korean input methods)
  */
-export function useGlobalShortcut(shortcuts: ShortcutMap, deps: unknown[] = []): void {
+export function useGlobalShortcut(shortcuts: ShortcutMap): void {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       // Suppress shortcuts when user is typing in a text input field
@@ -87,8 +81,8 @@ export function useGlobalShortcut(shortcuts: ShortcutMap, deps: unknown[] = []):
       }
 
       // Suppress shortcuts during IME composition (e.g., typing Chinese characters)
-      // keyCode 229 is the legacy "IME activity" signal
-      if (event.keyCode === 229) {
+      // Check both modern isComposing and legacy keyCode 229 signal (matches isImeComposing pattern)
+      if (event.isComposing || event.keyCode === 229) {
         return
       }
 
@@ -113,5 +107,5 @@ export function useGlobalShortcut(shortcuts: ShortcutMap, deps: unknown[] = []):
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
     }
-  }, [handleKeyDown, ...deps])
+  }, [handleKeyDown])
 }
