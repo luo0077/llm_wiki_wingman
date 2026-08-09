@@ -94,9 +94,12 @@ pub fn apply_proxy_env(config: &ProxyConfig) -> String {
     // through the now-removed proxy. The same applies to invalid
     // URLs and unsupported schemes (treat as disabled).
     let url = config.url.trim();
-    let invalid_scheme = !url.starts_with("http://") && !url.starts_with("https://");
+    let parsed_url = reqwest::Url::parse(url).ok();
+    let supported_url = parsed_url.as_ref().is_some_and(|parsed| {
+        matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
+    });
 
-    let proxy_active = config.enabled && !url.is_empty() && !invalid_scheme;
+    let proxy_active = config.enabled && supported_url;
     ACCEPT_INVALID_CERTS.store(
         proxy_active && config.accept_invalid_certs,
         Ordering::Relaxed,
@@ -108,10 +111,15 @@ pub fn apply_proxy_env(config: &ProxyConfig) -> String {
             "disabled".to_string()
         } else if url.is_empty() {
             "disabled (empty url)".to_string()
-        } else {
+        } else if !supported_url {
             // Mask before logging — an invalid URL might still
             // contain a password the user mis-typed.
-            format!("disabled (unsupported scheme: {})", redact_url(url))
+            format!(
+                "disabled (invalid or unsupported proxy url: {})",
+                redact_url(url)
+            )
+        } else {
+            "disabled".to_string()
         };
     }
 
@@ -322,6 +330,20 @@ mod tests {
                 accept_invalid_certs: false,
             });
             assert!(std::env::var("HTTP_PROXY").is_err());
+        });
+    }
+
+    #[test]
+    fn rejects_malformed_urls_even_when_the_scheme_prefix_looks_supported() {
+        isolated(|| {
+            apply_proxy_env(&ProxyConfig {
+                enabled: true,
+                url: "http://".into(),
+                bypass_local: true,
+                accept_invalid_certs: true,
+            });
+            assert!(std::env::var("HTTP_PROXY").is_err());
+            assert!(!ACCEPT_INVALID_CERTS.load(Ordering::Relaxed));
         });
     }
 

@@ -280,9 +280,7 @@ export async function enqueueInactiveProjectBatch(
   const pp = normalizePath(projectPath)
   const ids: string[] = []
   let written = false
-  const previousWrite = inactiveQueueWrite
-  inactiveQueueWrite = (async () => {
-    await previousWrite
+  const operation = inactiveQueueWrite.then(async () => {
     // restoreQueue sets currentProjectId before waiting for this write. If the
     // user opened this project meanwhile, leave queuing to the active scanner
     // instead of racing its in-memory queue with a stale disk snapshot.
@@ -324,8 +322,13 @@ export async function enqueueInactiveProjectBatch(
     }
     await writeFile(queueFilePath(pp), JSON.stringify(persisted, null, 2))
     written = true
-  })()
-  await inactiveQueueWrite
+  })
+  // Keep the serialization chain usable after an I/O failure while still
+  // returning the failure to this caller.
+  inactiveQueueWrite = operation.catch((err) => {
+    console.warn("[Ingest Queue] Failed to persist inactive-project tasks:", err)
+  })
+  await operation
   return written ? ids : []
 }
 

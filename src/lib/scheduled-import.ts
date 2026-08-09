@@ -595,10 +595,14 @@ export function startScheduledImport(
   stopScheduledImport()
 
   const runId = ++activeRunId
-  void runScheduledImportSweep(project, config, runId, true)
+  void runScheduledImportSweep(project, config, runId, true).catch((err) => {
+    console.error("Scheduled import sweep failed:", err)
+  })
 
   scanTimer = setInterval(() => {
-    void runScheduledImportSweep(project, config, runId, false)
+    void runScheduledImportSweep(project, config, runId, false).catch((err) => {
+      console.error("Scheduled import sweep failed:", err)
+    })
   }, 60 * 1000)
 }
 
@@ -612,11 +616,17 @@ async function runScheduledImportSweep(
   const projects = [activeProject, ...recents.filter((item) => item.id !== activeProject.id)]
   for (const project of projects) {
     if (runId !== activeRunId) return
-    const config = project.id === activeProject.id
-      ? forceActive
-        ? activeConfig
-        : (await loadScheduledImportConfig(project.path)) ?? activeConfig
-      : await loadScheduledImportConfig(project.path)
+    let config: ScheduledImportConfig | null
+    try {
+      config = project.id === activeProject.id
+        ? forceActive
+          ? activeConfig
+          : (await loadScheduledImportConfig(project.path)) ?? activeConfig
+        : await loadScheduledImportConfig(project.path)
+    } catch (err) {
+      console.warn(`[scheduled-import] failed to load config for ${project.path}:`, err)
+      continue
+    }
     if (!config) continue
     if (!isScheduledImportDue(config) && !(project.id === activeProject.id && forceActive)) {
       continue

@@ -484,16 +484,10 @@ export function SettingsView() {
 
       if (project) {
         await saveScheduledImportConfig(project.path, newScheduledImport)
-        const { startScheduledImport, stopScheduledImport } = await import("@/lib/scheduled-import")
-        if (
-          newScheduledImport.enabled &&
-          newScheduledImport.path &&
-          newScheduledImport.interval > 0
-        ) {
-          startScheduledImport(project, newScheduledImport)
-        } else {
-          stopScheduledImport()
-        }
+        const { startScheduledImport } = await import("@/lib/scheduled-import")
+        // Keep the cross-project scheduler alive even if the current
+        // project's own monitor was just disabled.
+        startScheduledImport(project, newScheduledImport)
       }
 
       await saveMineruConfig(newMineruConfig)

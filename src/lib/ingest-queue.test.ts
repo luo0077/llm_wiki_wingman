@@ -165,6 +165,24 @@ describe("ingest-queue — enqueue & basic processing", () => {
     expect(getQueue()).toHaveLength(0)
   })
 
+  it("recovers the inactive-project write chain after a persistence failure", async () => {
+    mockWriteFile
+      .mockRejectedValueOnce(new Error("disk temporarily unavailable"))
+      .mockResolvedValue(undefined as unknown as void)
+
+    await expect(enqueueInactiveProjectBatch(TEST_ID_B, TEST_PATH_B, [
+      { sourcePath: `${TEST_PATH_B}/raw/sources/first.pdf`, folderContext: "" },
+    ])).rejects.toThrow("disk temporarily unavailable")
+
+    await expect(enqueueInactiveProjectBatch(TEST_ID_B, TEST_PATH_B, [
+      { sourcePath: `${TEST_PATH_B}/raw/sources/second.pdf`, folderContext: "" },
+    ])).resolves.toHaveLength(1)
+    expect(mockWriteFile).toHaveBeenLastCalledWith(
+      `${TEST_PATH_B}/.llm-wiki/ingest-queue.json`,
+      expect.stringContaining("raw/sources/second.pdf"),
+    )
+  })
+
   it("enqueueIngest adds a pending task and triggers processing", async () => {
     mockAutoIngest.mockResolvedValue(["wiki/sources/foo.md"])
 
