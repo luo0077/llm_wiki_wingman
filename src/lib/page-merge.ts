@@ -216,21 +216,61 @@ function stripBodyWikilinkPathPrefixes(content: string): string {
   const body = content.slice(frontmatter[0].length)
   if (!body.includes("[[")) return content
 
-  const fencedParts = body.split(/(```[\s\S]*?```)/g)
-  const normalizedBody = fencedParts
-    .map((part, index) =>
-      index % 2 === 1 ? part : stripWikilinkPrefixesOutsideInlineCode(part),
-    )
-    .join("")
+  const normalizedBody = normalizeWikilinksOutsideCode(body)
 
   return `${frontmatter[0]}${normalizedBody}`
 }
 
-function stripWikilinkPrefixesOutsideInlineCode(text: string): string {
-  const inlineParts = text.split(/(`[^`\n]+`)/g)
-  return inlineParts
-    .map((part, index) => index % 2 === 1 ? part : replaceWikilinkPrefixes(part))
-    .join("")
+function normalizeWikilinksOutsideCode(body: string): string {
+  let fence: { marker: "`" | "~"; length: number } | null = null
+
+  return body.replace(/.*(?:\r?\n|$)/g, (line) => {
+    const content = line.replace(/\r?\n$/, "")
+    const markerMatch = content.match(/^ {0,3}(`{3,}|~{3,})/)
+    if (markerMatch) {
+      const marker = markerMatch[1][0] as "`" | "~"
+      const length = markerMatch[1].length
+      if (!fence) fence = { marker, length }
+      else if (
+        marker === fence.marker &&
+        length >= fence.length &&
+        content.slice(markerMatch[0].length).trim() === ""
+      ) {
+        fence = null
+      }
+      return line
+    }
+    if (fence || /^(?: {4}|\t)/.test(content)) return line
+
+    return replaceOutsideInlineCode(line)
+  })
+}
+
+function replaceOutsideInlineCode(text: string): string {
+  let output = ""
+  let cursor = 0
+
+  while (cursor < text.length) {
+    const opening = text.indexOf("`", cursor)
+    if (opening < 0) return output + replaceWikilinkPrefixes(text.slice(cursor))
+
+    output += replaceWikilinkPrefixes(text.slice(cursor, opening))
+    let runEnd = opening + 1
+    while (text[runEnd] === "`") runEnd += 1
+    const delimiter = text.slice(opening, runEnd)
+    const closing = text.indexOf(delimiter, runEnd)
+    if (closing < 0) {
+      // An unmatched run is ordinary Markdown text, not an inline code span.
+      output += replaceWikilinkPrefixes(text.slice(opening, runEnd))
+      cursor = runEnd
+      continue
+    }
+
+    output += text.slice(opening, closing + delimiter.length)
+    cursor = closing + delimiter.length
+  }
+
+  return output
 }
 
 const PAGE_WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]*))?\]\]/g
@@ -240,6 +280,8 @@ function replaceWikilinkPrefixes(text: string): string {
     PAGE_WIKILINK_RE,
     (match, rawTarget: string, rawAlias: string | undefined, offset: number) => {
       if (offset > 0 && text[offset - 1] === "!") return match
+      const preceding = text.slice(0, offset).match(/\\+$/)?.[0].length ?? 0
+      if (preceding % 2 === 1) return match
 
       const target = rawTarget.trim()
       const normalizedTarget = bareWikilinkTarget(target)
@@ -263,7 +305,13 @@ function bareWikilinkTarget(target: string): string {
   if (!normalizedPath.includes("/")) return target
 
   const leaf = normalizedPath.split("/").pop()
-  return leaf ? `${leaf}${fragment}` : target
+  if (!leaf) return target
+  const extensionIndex = leaf.lastIndexOf(".")
+  if (extensionIndex > 0 && leaf.slice(extensionIndex).toLowerCase() !== ".md") {
+    return target
+  }
+
+  return `${leaf}${fragment}`
 }
 
 async function tryBackup(
