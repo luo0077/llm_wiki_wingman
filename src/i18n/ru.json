@@ -207,6 +207,10 @@
     "confirm": "Подтвердить",
     "loadingMore": "Загрузка дополнительных источников...",
     "sourceCount": "{{count}} источник",
+    "searchPlaceholder": "Фильтр источников по имени или пути",
+    "clearSearch": "Очистить фильтр источников",
+    "noSearchResults": "Нет источников по запросу «{{query}}»",
+    "filteredSourceCount": "{{count}} из {{total}} источников",
     "sourceCount_plural": "{{count}} источников"
   },
   "chat": {

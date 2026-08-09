@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
-import { Plus, FileText, RefreshCw, BookOpen, Trash2, Folder, ChevronRight, ChevronDown, Link, ExternalLink } from "lucide-react"
+import { Plus, FileText, RefreshCw, BookOpen, Trash2, Folder, ChevronRight, ChevronDown, Link, ExternalLink, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -50,6 +51,7 @@ export function SourcesView() {
   const [urlResults, setUrlResults] = useState<UrlImportResult[]>([])
   const [ingestedIdentities, setIngestedIdentities] = useState<string[]>([])
   const [queueSnapshot, setQueueSnapshot] = useState<IngestTask[]>(() => [...getQueue()])
+  const [sourceQuery, setSourceQuery] = useState("")
   /**
    * Path of the source-tree node currently in "click again to
    * confirm delete" state. Lifted up here (rather than living
@@ -91,6 +93,10 @@ export function SourcesView() {
   }, [loadSources, dataVersion])
 
   useEffect(() => {
+    setSourceQuery("")
+  }, [project?.id])
+
+  useEffect(() => {
     if (!project) {
       setIngestedIdentities([])
       return
@@ -129,6 +135,12 @@ export function SourcesView() {
     }
     return statuses
   }, [ingestedIdentities, project, queueSnapshot])
+  const filteredSources = useMemo(
+    () => filterSourceTreeByQuery(sources, sourceQuery),
+    [sourceQuery, sources],
+  )
+  const totalSourceCount = useMemo(() => countFiles(sources), [sources])
+  const filteredSourceCount = useMemo(() => countFiles(filteredSources), [filteredSources])
 
   async function handleRefreshSources() {
     if (!project || refreshing) return
@@ -424,6 +436,33 @@ export function SourcesView() {
         </DialogContent>
       </Dialog>
 
+      {sources.length > 0 && (
+        <div className="border-b px-4 py-2.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={sourceQuery}
+              onChange={(event) => setSourceQuery(event.target.value)}
+              placeholder={t("sources.searchPlaceholder")}
+              aria-label={t("sources.searchPlaceholder")}
+              className="h-8 pl-8 pr-8"
+            />
+            {sourceQuery && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0.5 top-1/2 h-7 w-7 -translate-y-1/2"
+                onClick={() => setSourceQuery("")}
+                aria-label={t("sources.clearSearch")}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         {refreshError && (
           <div className="mx-4 mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -448,10 +487,14 @@ export function SourcesView() {
               </Button>
             </div>
           </div>
+        ) : filteredSources.length === 0 ? (
+          <div className="flex h-32 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            {t("sources.noSearchResults", { query: sourceQuery.trim() })}
+          </div>
         ) : (
           <div className="p-2">
             <SourceTree
-              nodes={sources}
+              nodes={filteredSources}
               onOpen={handleOpenSource}
               onOpenExternal={handleOpenSourceExternally}
               onIngest={handleIngest}
@@ -461,13 +504,21 @@ export function SourcesView() {
               setPendingDeletePath={setPendingDeletePath}
               ingestingPath={ingestingPath}
               sourceStatuses={sourceStatuses}
+              forceExpanded={Boolean(sourceQuery.trim())}
             />
           </div>
         )}
       </ScrollArea>
 
       <div className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
-        <span>{t("sources.sourceCount", { count: countFiles(sources) })}</span>
+        <span>
+          {sourceQuery.trim()
+            ? t("sources.filteredSourceCount", {
+                count: filteredSourceCount,
+                total: totalSourceCount,
+              })
+            : t("sources.sourceCount", { count: totalSourceCount })}
+        </span>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -510,6 +561,28 @@ function countFiles(nodes: FileNode[]): number {
   return count
 }
 
+export function filterSourceTreeByQuery(
+  nodes: readonly FileNode[],
+  query: string,
+): FileNode[] {
+  const needle = query.trim().normalize("NFKC").toLocaleLowerCase()
+  if (!needle) return [...nodes]
+
+  const visit = (node: FileNode): FileNode | null => {
+    const haystack = `${node.name}\n${normalizePath(node.path)}`
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+    if (haystack.includes(needle)) return node
+    if (!node.is_dir || !node.children) return null
+    const children = node.children
+      .map(visit)
+      .filter((child): child is FileNode => child !== null)
+    return children.length > 0 ? { ...node, children } : null
+  }
+
+  return nodes.map(visit).filter((node): node is FileNode => node !== null)
+}
+
 function sortSourceNodes(nodes: readonly FileNode[]): FileNode[] {
   return [...nodes].sort((a, b) => {
     if (a.is_dir && !b.is_dir) return -1
@@ -544,6 +617,7 @@ function SourceTree({
   setPendingDeletePath,
   ingestingPath,
   sourceStatuses,
+  forceExpanded,
 }: {
   nodes: FileNode[]
   onOpen: (node: FileNode) => void
@@ -559,12 +633,16 @@ function SourceTree({
   setPendingDeletePath: (path: string | null) => void
   ingestingPath: string | null
   sourceStatuses: ReadonlyMap<string, SourceIngestStatus>
+  forceExpanded: boolean
 }) {
   const { t } = useTranslation()
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [visibleLimit, setVisibleLimit] = useState(SOURCE_TREE_INITIAL_ROWS)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const rows = useMemo(() => flattenVisibleRows(nodes, collapsed), [nodes, collapsed])
+  const rows = useMemo(
+    () => flattenVisibleRows(nodes, forceExpanded ? {} : collapsed),
+    [collapsed, forceExpanded, nodes],
+  )
   const visibleRows = rows.slice(0, visibleLimit)
   const hasMore = visibleLimit < rows.length
 
@@ -619,7 +697,7 @@ function SourceTree({
         const isPendingDelete = pendingDeletePath === node.path
         const ingestStatus = sourceStatuses.get(normalizePath(node.path)) ?? "not-ingested"
         if (node.is_dir && node.children) {
-          const isCollapsed = collapsed[node.path] ?? false
+          const isCollapsed = !forceExpanded && (collapsed[node.path] ?? false)
           return (
             <div key={node.path}>
               <div
@@ -627,7 +705,9 @@ function SourceTree({
                 style={{ paddingLeft: `${depth * 16 + 4}px` }}
               >
                 <button
-                  onClick={() => toggle(node.path)}
+                  onClick={() => {
+                    if (!forceExpanded) toggle(node.path)
+                  }}
                   className="flex flex-1 items-center gap-1.5 px-1 py-1 text-left"
                 >
                   {isCollapsed ? (

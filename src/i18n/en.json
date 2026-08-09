@@ -207,6 +207,10 @@
     "confirm": "Confirm",
     "loadingMore": "Loading more sources...",
     "sourceCount": "{{count}} source",
+    "searchPlaceholder": "Filter sources by name or path",
+    "clearSearch": "Clear source filter",
+    "noSearchResults": "No sources match “{{query}}”",
+    "filteredSourceCount": "{{count}} of {{total}} sources",
     "sourceCount_plural": "{{count}} sources"
   },
   "chat": {

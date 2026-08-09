@@ -207,6 +207,10 @@
     "confirm": "Conferma",
     "loadingMore": "Caricamento di altre fonti...",
     "sourceCount": "{{count}} fonte",
+    "searchPlaceholder": "Filtra le fonti per nome o percorso",
+    "clearSearch": "Cancella filtro fonti",
+    "noSearchResults": "Nessuna fonte corrisponde a “{{query}}”",
+    "filteredSourceCount": "{{count}} di {{total}} fonti",
     "sourceCount_plural": "{{count}} fonti"
   },
   "chat": {

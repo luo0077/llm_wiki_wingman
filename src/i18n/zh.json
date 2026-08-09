@@ -207,6 +207,10 @@
     "confirm": "确认",
     "loadingMore": "加载更多资料...",
     "sourceCount": "{{count}} 个资料",
+    "searchPlaceholder": "按名称或路径筛选原始资料",
+    "clearSearch": "清除资料筛选",
+    "noSearchResults": "没有匹配“{{query}}”的原始资料",
+    "filteredSourceCount": "显示 {{count}} / {{total}} 个资料",
     "sourceCount_plural": "{{count}} 个资料"
   },
   "chat": {
