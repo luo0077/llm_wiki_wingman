@@ -26,6 +26,7 @@
     "review": "Revisione",
     "skills": "Skill",
     "settings": "Impostazioni",
+    "settingsShortcut": " (Cmd/Ctrl+,)",
     "switchProject": "Cambia progetto",
     "updateAvailable": "Aggiornamento disponibile",
     "updateAvailableSuffix": " · aggiorna"
@@ -185,6 +186,8 @@
     "refreshFolderHint": "Riesamina la cartella delle fonti ed elabora i file nuovi, modificati o eliminati.",
     "refreshFolderTooltip": "Riesamina la cartella delle fonti del progetto con le stesse regole del monitoraggio automatico. I file consentiti nuovi o modificati vengono messi in coda per l'elaborazione; le fonti eliminate avviano la normale pulizia di wiki e indice; infine l'albero dei file viene ricostruito.",
     "refreshFailed": "Impossibile aggiornare le fonti: {{error}}",
+    "openExternal": "Apri nell'app predefinita",
+    "openExternalFailed": "Impossibile aprire {{name}}: {{error}}",
     "ingest": "Elabora",
     "ingestStatus": {
       "not-ingested": "Da elaborare",

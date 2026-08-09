@@ -31,10 +31,13 @@ function flattenKeys(obj: unknown, prefix = ""): string[] {
   return out
 }
 
-function valueAtPath(bundle: unknown, path: string): string {
+function valueAtPath(bundle: unknown, path: string): unknown {
   let value = bundle
-  for (const part of path.split(".")) value = (value as Record<string, unknown>)[part]
-  return value as string
+  for (const part of path.split(".")) {
+    if (value === null || typeof value !== "object") return undefined
+    value = (value as Record<string, unknown>)[part]
+  }
+  return value
 }
 
 function interpolationVariables(value: string): string[] {
@@ -106,10 +109,14 @@ describe("i18n bundle parity", () => {
   it("translated strings preserve English interpolation variables", () => {
     for (const [locale, bundle] of Object.entries(locales)) {
       for (const path of enKeys) {
+        const translated = valueAtPath(bundle, path)
+        // Missing/non-string values are reported by the structural tests with
+        // a clearer diagnostic; do not turn them into an unrelated TypeError.
+        if (typeof translated !== "string") continue
         expect(
-          interpolationVariables(valueAtPath(bundle, path)),
+          interpolationVariables(translated),
           `${locale}.json changes interpolation variables for ${path}`,
-        ).toEqual(interpolationVariables(valueAtPath(en, path)))
+        ).toEqual(interpolationVariables(valueAtPath(en, path) as string))
       }
     }
   })
