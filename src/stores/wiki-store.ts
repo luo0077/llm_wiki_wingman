@@ -286,6 +286,8 @@ export interface MineruConfig {
   backend?: "cloud" | "local"
   /** Base URL of a compatible self-hosted MinerU HTTP wrapper. */
   localEndpoint?: string
+  /** Optional Bearer token used only for the self-hosted MinerU service. */
+  localToken?: string
   localBackend?: MineruLocalBackend
   localEffort?: MineruEffort
   localParseMethod?: MineruParseMethod

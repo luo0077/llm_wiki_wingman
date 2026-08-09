@@ -932,6 +932,8 @@
         "localBackend": "官方自托管 mineru-api——私有、离线",
         "localEndpoint": "本地服务地址",
         "localInfo": "填写官方 mineru-api 或 mineru-router 服务的基础地址。",
+        "localToken": "本地 API Key（可选）",
+        "localTokenHint": "仅发送到自托管服务，使用 Authorization: Bearer 请求头",
         "parsingBackend": "解析后端",
         "backendHybrid": "Hybrid engine（推荐）",
         "backendPipeline": "Pipeline",

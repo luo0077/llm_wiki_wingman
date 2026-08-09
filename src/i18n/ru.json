@@ -932,6 +932,8 @@
         "localBackend": "Официальный self-hosted mineru-api — приватно, офлайн",
         "localEndpoint": "Эндпоинт локального сервиса",
         "localInfo": "Базовый URL официального сервиса mineru-api или mineru-router.",
+        "localToken": "Локальный API-ключ (необязательно)",
+        "localTokenHint": "Отправляется только локальному сервису в заголовке Authorization: Bearer",
         "parsingBackend": "Бэкенд разбора",
         "backendHybrid": "Гибридный движок (рекомендуется)",
         "backendPipeline": "Pipeline",

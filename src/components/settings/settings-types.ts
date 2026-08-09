@@ -84,6 +84,7 @@ export interface SettingsDraft {
   mineruEnabled: boolean
   mineruBackend: "cloud" | "local"
   mineruLocalEndpoint: string
+  mineruLocalToken: string
   mineruLocalBackend: MineruLocalBackend
   mineruLocalEffort: MineruEffort
   mineruLocalParseMethod: MineruParseMethod

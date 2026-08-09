@@ -932,6 +932,8 @@
         "localBackend": "Official self-hosted mineru-api - private, offline",
         "localEndpoint": "Local service endpoint",
         "localInfo": "Base URL of an official mineru-api or mineru-router service.",
+        "localToken": "Local API key (optional)",
+        "localTokenHint": "Sent only to the self-hosted service as an Authorization: Bearer header",
         "parsingBackend": "Parsing backend",
         "backendHybrid": "Hybrid engine (Recommended)",
         "backendPipeline": "Pipeline",
