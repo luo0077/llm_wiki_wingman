@@ -19,6 +19,8 @@ export interface IngestTask {
   addedAt: number
   error: string | null
   retryCount: number
+  /** Background scheduled imports start when their project is next opened. */
+  autoStart?: boolean
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -59,6 +61,7 @@ let processedSinceDrain = false
 // Abort controller for the review-sweep LLM call so switching projects
 // cancels a long-running judgment instead of burning tokens.
 let sweepAbortController: AbortController | null = null
+let inactiveQueueWrite: Promise<void> = Promise.resolve()
 
 function resetQueueAccounting(): void {
   completedSinceIdle = 0
@@ -258,6 +261,72 @@ export async function enqueueBatch(
   processNext(currentProjectId)
 
   return ids
+}
+
+/**
+ * Persist ingest work for a project that is not currently open. No model work
+ * starts here; restoreQueue starts these marked tasks when the project is next
+ * opened. This keeps background folder monitoring project-isolated.
+ */
+export async function enqueueInactiveProjectBatch(
+  projectId: string,
+  projectPath: string,
+  files: Array<{ sourcePath: string; folderContext: string }>,
+): Promise<string[]> {
+  if (currentProjectId === projectId) {
+    return enqueueBatch(projectId, files)
+  }
+
+  const pp = normalizePath(projectPath)
+  const ids: string[] = []
+  let written = false
+  const previousWrite = inactiveQueueWrite
+  inactiveQueueWrite = (async () => {
+    await previousWrite
+    // restoreQueue sets currentProjectId before waiting for this write. If the
+    // user opened this project meanwhile, leave queuing to the active scanner
+    // instead of racing its in-memory queue with a stale disk snapshot.
+    if (currentProjectId === projectId) return
+    const persisted = await loadQueue(pp, projectId)
+    if (currentProjectId === projectId) return
+    for (const file of files) {
+      const normalizedSourcePath = normalizePath(file.sourcePath)
+      const sourcePath = normalizedSourcePath.startsWith(`${pp}/`)
+        ? normalizedSourcePath.slice(pp.length + 1)
+        : normalizedSourcePath
+      const existing = persisted.find((task) =>
+        task.projectId === projectId &&
+        task.status !== "done" &&
+        normalizePath(task.sourcePath) === sourcePath
+      )
+      if (existing) {
+        existing.status = "pending"
+        existing.error = null
+        existing.retryCount = 0
+        existing.folderContext = file.folderContext || existing.folderContext
+        existing.autoStart = true
+        ids.push(existing.id)
+        continue
+      }
+      const task: IngestTask = {
+        id: generateId(),
+        projectId,
+        sourcePath,
+        folderContext: file.folderContext,
+        status: "pending",
+        addedAt: Date.now(),
+        error: null,
+        retryCount: 0,
+        autoStart: true,
+      }
+      persisted.push(task)
+      ids.push(task.id)
+    }
+    await writeFile(queueFilePath(pp), JSON.stringify(persisted, null, 2))
+    written = true
+  })()
+  await inactiveQueueWrite
+  return written ? ids : []
 }
 
 /**
@@ -730,6 +799,8 @@ export async function restoreQueue(
   currentProjectId = projectId
   currentProjectPath = pp
 
+  await inactiveQueueWrite
+
   const saved = await loadQueue(pp, projectId)
 
   if (saved.length === 0) return
@@ -755,7 +826,7 @@ export async function restoreQueue(
   queue = mine
   restoredPausedTaskIds = new Set(
     queue
-      .filter((t) => t.status === "pending")
+      .filter((t) => t.status === "pending" && !t.autoStart)
       .map((t) => t.id),
   )
   await saveQueue(pp)

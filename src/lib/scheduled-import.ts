@@ -14,13 +14,15 @@ import type { ScheduledImportConfig } from "@/stores/wiki-store"
 import {
   loadScheduledImportConfig,
   saveScheduledImportConfig,
+  getRecentProjects,
 } from "@/lib/project-store"
 import {
   deleteSourceFile,
   enqueueSourceIngest,
+  folderContextForSourcePath,
   isIngestableSourcePath,
 } from "@/lib/source-lifecycle"
-import { discardTasksForSources } from "@/lib/ingest-queue"
+import { discardTasksForSources, enqueueInactiveProjectBatch } from "@/lib/ingest-queue"
 import { useActivityStore } from "@/stores/activity-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 
@@ -41,6 +43,7 @@ interface ImportDbStore {
 
 type ScanOptions = {
   runId?: number
+  allowInactive?: boolean
 }
 
 const EMPTY_DB: ImportDb = {
@@ -398,8 +401,23 @@ function isCurrentProject(projectId: string): boolean {
   return useWikiStore.getState().project?.id === projectId
 }
 
-function isCurrentRun(projectId: string, runId?: number): boolean {
-  return isCurrentProject(projectId) && (runId === undefined || runId === activeRunId)
+function isCurrentRun(
+  projectId: string,
+  runId?: number,
+  allowInactive = false,
+): boolean {
+  return (allowInactive || isCurrentProject(projectId)) &&
+    (runId === undefined || runId === activeRunId)
+}
+
+export function isScheduledImportDue(
+  config: ScheduledImportConfig,
+  now = Date.now(),
+): boolean {
+  if (!config.enabled || !config.path || config.interval <= 0) return false
+  if (!config.lastScan) return true
+  const intervalMs = Math.max(1, Math.min(1440, config.interval)) * 60 * 1000
+  return now - config.lastScan >= intervalMs
 }
 
 export async function scanAndImport(
@@ -415,7 +433,9 @@ export async function scanAndImport(
     console.warn(
       `[scheduled-import] skipped self-referential path "${importRoot}". Use source folder monitoring for project sources instead.`,
     )
-    notifyManagedScheduledImportPath(project, importRoot)
+    if (isCurrentProject(project.id)) {
+      notifyManagedScheduledImportPath(project, importRoot)
+    }
     return
   }
 
@@ -424,14 +444,13 @@ export async function scanAndImport(
   scanning = true
 
   try {
-    if (!isCurrentRun(project.id, options.runId)) {
+    if (!isCurrentRun(project.id, options.runId, options.allowInactive)) {
       return
     }
 
     const tree = await listDirectory(importRoot)
     const db = await loadImportDb(projectPath, importRoot)
     const nextDb: ImportDb = { files: {}, lastScan: Date.now() }
-    const llmConfig = useWikiStore.getState().llmConfig
     const changedFiles: Array<{ key: string; md5: string; destPath: string }> = []
     const observedEligibleKeys = new Set<string>()
 
@@ -448,7 +467,7 @@ export async function scanAndImport(
 
         const key = dbDirectoryKey(sourcePath)
 
-        if (!isCurrentRun(project.id, options.runId)) {
+        if (!isCurrentRun(project.id, options.runId, options.allowInactive)) {
           return
         }
 
@@ -483,26 +502,48 @@ export async function scanAndImport(
       }
     }
 
-    if (!isCurrentRun(project.id, options.runId)) {
+    if (!isCurrentRun(project.id, options.runId, options.allowInactive)) {
       return
     }
 
-    const removedSourcesChanged = await cleanupRemovedScheduledImports(
-      project,
-      importRoot,
-      db,
-      observedEligibleKeys,
-      nextDb,
-    )
+    let removedSourcesChanged = false
+    if (isCurrentProject(project.id)) {
+      removedSourcesChanged = await cleanupRemovedScheduledImports(
+        project,
+        importRoot,
+        db,
+        observedEligibleKeys,
+        nextDb,
+      )
+    } else {
+      // Defer destructive cleanup until the project is opened. Preserve old
+      // records so the first active scan can still identify removals.
+      for (const [key, md5] of Object.entries(db.files)) {
+        if (!observedEligibleKeys.has(key)) nextDb.files[key] = md5
+      }
+    }
 
-    if (!isCurrentRun(project.id, options.runId)) {
+    if (!isCurrentRun(project.id, options.runId, options.allowInactive)) {
       return
     }
 
     if (changedFiles.length > 0) {
       const destPaths = changedFiles.map((file) => file.destPath)
-      if (isCurrentRun(project.id, options.runId)) {
-        const ids = await enqueueSourceIngest(project, destPaths, llmConfig)
+      if (isCurrentRun(project.id, options.runId, options.allowInactive)) {
+        const ids = isCurrentProject(project.id)
+          ? await enqueueSourceIngest(
+              project,
+              destPaths,
+              useWikiStore.getState().llmConfig,
+            )
+          : await enqueueInactiveProjectBatch(
+              project.id,
+              project.path,
+              destPaths.map((sourcePath) => ({
+                sourcePath,
+                folderContext: folderContextForSourcePath(sourcePath),
+              })),
+            )
         if (ids.length > 0) {
           for (const file of changedFiles) {
             nextDb.files[file.key] = file.md5
@@ -514,7 +555,10 @@ export async function scanAndImport(
     }
 
 
-    if (removedSourcesChanged || changedFiles.some((file) => nextDb.files[file.key])) {
+    if (
+      isCurrentProject(project.id) &&
+      (removedSourcesChanged || changedFiles.some((file) => nextDb.files[file.key]))
+    ) {
       await refreshProjectFileTree(projectPath, {
         projectId: project.id,
         bumpDataVersion: true,
@@ -550,18 +594,41 @@ export function startScheduledImport(
 ): void {
   stopScheduledImport()
 
-  if (!config.enabled || !config.path || config.interval <= 0) {
-    return
-  }
-
   const runId = ++activeRunId
-  const intervalMs = Math.max(1, Math.min(1440, config.interval)) * 60 * 1000
-
-  void scanAndImport(project, config.path, { runId })
+  void runScheduledImportSweep(project, config, runId, true)
 
   scanTimer = setInterval(() => {
-    void scanAndImport(project, config.path, { runId })
-  }, intervalMs)
+    void runScheduledImportSweep(project, config, runId, false)
+  }, 60 * 1000)
+}
+
+async function runScheduledImportSweep(
+  activeProject: WikiProject,
+  activeConfig: ScheduledImportConfig,
+  runId: number,
+  forceActive: boolean,
+): Promise<void> {
+  const recents = await getRecentProjects()
+  const projects = [activeProject, ...recents.filter((item) => item.id !== activeProject.id)]
+  for (const project of projects) {
+    if (runId !== activeRunId) return
+    const config = project.id === activeProject.id
+      ? forceActive
+        ? activeConfig
+        : (await loadScheduledImportConfig(project.path)) ?? activeConfig
+      : await loadScheduledImportConfig(project.path)
+    if (!config) continue
+    if (!isScheduledImportDue(config) && !(project.id === activeProject.id && forceActive)) {
+      continue
+    }
+    if (!config.enabled || !config.path || config.interval <= 0) {
+      continue
+    }
+    await scanAndImport(project, config.path, {
+      runId,
+      allowInactive: project.id !== activeProject.id,
+    })
+  }
 }
 
 export function stopScheduledImport(): void {

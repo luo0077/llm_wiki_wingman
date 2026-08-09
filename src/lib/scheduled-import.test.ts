@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   isIngestableSourcePath: vi.fn(),
   loadScheduledImportConfig: vi.fn(),
   saveScheduledImportConfig: vi.fn(),
+  getRecentProjects: vi.fn(),
+  enqueueInactiveProjectBatch: vi.fn(),
+  folderContextForSourcePath: vi.fn(),
 }))
 
 vi.mock("@/commands/fs", () => ({
@@ -32,16 +35,19 @@ vi.mock("@/commands/fs", () => ({
 vi.mock("@/lib/source-lifecycle", () => ({
   deleteSourceFile: mocks.deleteSourceFile,
   enqueueSourceIngest: mocks.enqueueSourceIngest,
+  folderContextForSourcePath: mocks.folderContextForSourcePath,
   isIngestableSourcePath: mocks.isIngestableSourcePath,
 }))
 
 vi.mock("@/lib/ingest-queue", () => ({
   discardTasksForSources: mocks.discardTasksForSources,
+  enqueueInactiveProjectBatch: mocks.enqueueInactiveProjectBatch,
 }))
 
 vi.mock("@/lib/project-store", () => ({
   loadScheduledImportConfig: mocks.loadScheduledImportConfig,
   saveScheduledImportConfig: mocks.saveScheduledImportConfig,
+  getRecentProjects: mocks.getRecentProjects,
 }))
 
 import {
@@ -49,6 +55,7 @@ import {
   resolveImportPath,
   scheduledImportDestinationForFile,
   scanAndImport,
+  isScheduledImportDue,
   shouldSkipScheduledImportConfigFile,
   shouldSkipScheduledImportFile,
 } from "./scheduled-import"
@@ -59,6 +66,19 @@ describe("scheduled import path handling", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getRecentProjects.mockResolvedValue([])
+  })
+
+  it("runs scheduled imports only after their configured interval", () => {
+    const config = {
+      enabled: true,
+      path: "/Users/me/inbox",
+      interval: 30,
+      lastScan: 1_000,
+    }
+    expect(isScheduledImportDue(config, 1_000 + 29 * 60_000)).toBe(false)
+    expect(isScheduledImportDue(config, 1_000 + 30 * 60_000)).toBe(true)
+    expect(isScheduledImportDue({ ...config, enabled: false }, Number.MAX_SAFE_INTEGER)).toBe(false)
   })
 
   it("resolves relative paths from the project root", () => {
@@ -237,6 +257,8 @@ describe("scanAndImport failure handling", () => {
       lastScan: null,
     })
     mocks.saveScheduledImportConfig.mockResolvedValue(undefined)
+    mocks.enqueueInactiveProjectBatch.mockResolvedValue(["background-task-1"])
+    mocks.folderContextForSourcePath.mockReturnValue("scheduled-import")
     mocks.writeFileAtomic.mockResolvedValue(undefined)
     mocks.listDirectory.mockImplementation(async (path: string) => {
       if (path === "/Users/me/inbox") {
@@ -325,6 +347,31 @@ describe("scanAndImport failure handling", () => {
       expect.any(Object),
     )
     expect(mocks.writeFileAtomic).toHaveBeenCalled()
+  })
+
+  it("copies and durably queues changed files for an inactive project", async () => {
+    useWikiStore.setState({
+      project: {
+        id: "active-project",
+        name: "Active",
+        path: "/Users/me/active-project",
+      },
+    })
+
+    await scanAndImport(project, "/Users/me/inbox", { allowInactive: true })
+
+    const destination = "/Users/me/wiki-project/raw/sources/scheduled-import/paper.pdf"
+    expect(mocks.copyFile).toHaveBeenCalledWith("/Users/me/inbox/paper.pdf", destination)
+    expect(mocks.enqueueSourceIngest).not.toHaveBeenCalled()
+    expect(mocks.enqueueInactiveProjectBatch).toHaveBeenCalledWith(
+      project.id,
+      project.path,
+      [{ sourcePath: destination, folderContext: "scheduled-import" }],
+    )
+    expect(mocks.writeFileAtomic).toHaveBeenCalledWith(
+      "/Users/me/wiki-project/.llm-wiki/scheduled-import-db.json",
+      expect.stringContaining('"/Users/me/inbox/paper.pdf": "md5-new"'),
+    )
   })
 
   it("skips large files before hashing or copying", async () => {

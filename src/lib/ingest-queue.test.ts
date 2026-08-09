@@ -53,6 +53,7 @@ vi.mock("@/lib/project-identity", () => ({
 import {
   enqueueIngest,
   enqueueBatch,
+  enqueueInactiveProjectBatch,
   retryTask,
   retryTasks,
   retryAllFailedTasks,
@@ -116,6 +117,54 @@ beforeEach(async () => {
 })
 
 describe("ingest-queue — enqueue & basic processing", () => {
+  it("persists inactive-project tasks and starts them when that project opens", async () => {
+    const ids = await enqueueInactiveProjectBatch(TEST_ID_B, TEST_PATH_B, [
+      {
+        sourcePath: `${TEST_PATH_B}/raw/sources/scheduled-import/report.pdf`,
+        folderContext: "scheduled-import",
+      },
+    ])
+
+    expect(ids).toHaveLength(1)
+    const inactiveWrite = mockWriteFile.mock.calls.find(
+      ([path]) => path === `${TEST_PATH_B}/.llm-wiki/ingest-queue.json`,
+    )
+    expect(inactiveWrite).toBeDefined()
+    const persisted = JSON.parse(String(inactiveWrite?.[1])) as Array<{
+      sourcePath: string
+      status: string
+      autoStart?: boolean
+    }>
+    expect(persisted).toMatchObject([
+      {
+        sourcePath: "raw/sources/scheduled-import/report.pdf",
+        status: "pending",
+        autoStart: true,
+      },
+    ])
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path === `${TEST_PATH_B}/.llm-wiki/ingest-queue.json`) {
+        return String(inactiveWrite?.[1])
+      }
+      throw new Error("ENOENT")
+    })
+    mockAutoIngest.mockResolvedValue(["wiki/sources/report.md"])
+
+    await restoreQueue(TEST_ID_B, TEST_PATH_B)
+    await flushMicrotasks(20)
+
+    expect(mockAutoIngest).toHaveBeenCalledWith(
+      TEST_PATH_B,
+      `${TEST_PATH_B}/raw/sources/scheduled-import/report.pdf`,
+      expect.any(Object),
+      expect.any(AbortSignal),
+      "scheduled-import",
+      expect.any(Function),
+    )
+    expect(getQueue()).toHaveLength(0)
+  })
+
   it("enqueueIngest adds a pending task and triggers processing", async () => {
     mockAutoIngest.mockResolvedValue(["wiki/sources/foo.md"])
 
