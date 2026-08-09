@@ -1325,7 +1325,34 @@ async function autoIngestImpl(
     }
   }
 
+  // A partial write is not a successful ingest. Keep the generated files on
+  // disk so a retry can merge/repair them, but do not cache or embed the
+  // incomplete result. Throwing here keeps the queue task visible as
+  // pending/failed instead of removing it as "done" while Sources reports the
+  // same file as not ingested.
+  if (hardFailures.length > 0 || unrecoveredTruncatedPaths.length > 0) {
+    const reasons = [
+      hardFailures.length > 0
+        ? `${hardFailures.length} wiki file write failure(s)`
+        : "",
+      unrecoveredTruncatedPaths.length > 0
+        ? `${unrecoveredTruncatedPaths.length} truncated wiki file(s) could not be repaired: ${unrecoveredTruncatedPaths.join(", ")}`
+        : "",
+    ].filter(Boolean)
+    const message = `Ingest incomplete: ${reasons.join("; ")}`
+    activity.updateItem(activityId, {
+      status: "error",
+      detail: warningSummary
+        ? `${message} — ${warningSummary} (saved to .llm-wiki/ingest-warnings.log)`
+        : message,
+      filesWritten: writtenPaths,
+    })
+    throw new Error(message)
+  }
+
   // ── Step 4: Parse review items ────────────────────────────────
+  // Do this only after the completeness gate above. Otherwise every queue
+  // retry could duplicate review items derived from the same partial output.
   throwIfIngestAborted(signal, activityId)
   const reviewItems = [
     ...parseReviewBlocks(generation, sp),
