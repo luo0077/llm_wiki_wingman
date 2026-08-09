@@ -191,6 +191,7 @@ interface ProxyConfig {
   enabled: boolean
   url: string
   bypassLocal: boolean
+  acceptInvalidCerts?: boolean
 }
 
 interface ScheduledImportConfig {
@@ -607,6 +608,7 @@ export const useWikiStore = create<WikiState>((set) => ({
     enabled: false,
     url: "",
     bypassLocal: true,
+    acceptInvalidCerts: false,
   },
 
   scheduledImportConfig: {

@@ -155,6 +155,7 @@ function initialDraft(
     proxyEnabled: proxy.enabled,
     proxyUrl: proxy.url,
     proxyBypassLocal: proxy.bypassLocal,
+    proxyAcceptInvalidCerts: proxy.acceptInvalidCerts === true,
     scheduledImportEnabled: scheduledImport.enabled,
     scheduledImportPath: displayPath,
     scheduledImportInterval: scheduledImport.interval,
@@ -401,6 +402,7 @@ export function SettingsView() {
       enabled: draft.proxyEnabled,
       url: draft.proxyUrl.trim(),
       bypassLocal: draft.proxyBypassLocal,
+      acceptInvalidCerts: draft.proxyAcceptInvalidCerts,
     }
     const newSourceWatch = normalizeSourceWatchConfig(draft.sourceWatchConfig)
     const newScheduledImport = {

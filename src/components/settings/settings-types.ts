@@ -62,6 +62,7 @@ export interface SettingsDraft {
   proxyEnabled: boolean
   proxyUrl: string
   proxyBypassLocal: boolean
+  proxyAcceptInvalidCerts: boolean
 
   // Scheduled Import
   scheduledImportEnabled: boolean

@@ -710,7 +710,9 @@
         "url": "Proxy URL",
         "urlHelp": "Full URL with scheme. Supported: http://, https://. (SOCKS5 not supported in this version.)",
         "bypassLocal": "Bypass proxy for local addresses (recommended)",
-        "bypassLocalHelp": "Requests to localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and *.local don't go through the proxy. Keep this on if you use Ollama / LM Studio / other local or LAN-deployed LLMs."
+        "bypassLocalHelp": "Requests to localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and *.local don't go through the proxy. Keep this on if you use Ollama / LM Studio / other local or LAN-deployed LLMs.",
+        "acceptInvalidCerts": "Ignore TLS certificate errors",
+        "acceptInvalidCertsHelp": "Use only with a trusted corporate proxy. This disables certificate verification for outbound requests and can expose encrypted traffic to interception."
       },
       "sourceWatch": {
         "title": "Source Folder Auto Watch",

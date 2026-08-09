@@ -710,7 +710,9 @@
         "url": "URL del proxy",
         "urlHelp": "URL completo di schema. Supportati: http://, https://. (SOCKS5 non è supportato in questa versione.)",
         "bypassLocal": "Escludi dal proxy gli indirizzi locali (consigliato)",
-        "bypassLocalHelp": "Le richieste verso localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 e *.local non passano dal proxy. Tienilo attivo se usi Ollama / LM Studio o altri LLM locali o in rete locale."
+        "bypassLocalHelp": "Le richieste verso localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 e *.local non passano dal proxy. Tienilo attivo se usi Ollama / LM Studio o altri LLM locali o in rete locale.",
+        "acceptInvalidCerts": "Ignora gli errori del certificato TLS",
+        "acceptInvalidCertsHelp": "Usa questa opzione solo con un proxy aziendale attendibile. Disabilita la verifica dei certificati per le richieste in uscita e può esporre il traffico cifrato a intercettazioni."
       },
       "sourceWatch": {
         "title": "Monitoraggio automatico della cartella fonti",

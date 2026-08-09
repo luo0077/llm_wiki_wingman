@@ -710,7 +710,9 @@
         "url": "代理地址",
         "urlHelp": "完整 URL，必须带协议头。支持：http://、https://（当前版本不支持 SOCKS5）。",
         "bypassLocal": "本地地址不走代理（推荐）",
-        "bypassLocalHelp": "对 localhost、127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16 以及 *.local 的请求会绕过代理。如果你用 Ollama / LM Studio 或局域网内的 LLM 服务，请保持开启。"
+        "bypassLocalHelp": "对 localhost、127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16 以及 *.local 的请求会绕过代理。如果你用 Ollama / LM Studio 或局域网内的 LLM 服务，请保持开启。",
+        "acceptInvalidCerts": "忽略 TLS 证书错误",
+        "acceptInvalidCertsHelp": "仅用于可信的企业代理。此选项会关闭外部请求的证书校验，可能使加密流量面临被拦截的风险。"
       },
       "sourceWatch": {
         "title": "资料文件夹自动监控",
