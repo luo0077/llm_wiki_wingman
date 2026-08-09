@@ -18,10 +18,16 @@
  * - Windows/Linux: Ctrl + key
  */
 
-import { useEffect, useCallback } from "react"
+import { useEffect, useRef } from "react"
+
+export interface ShortcutDefinition {
+  callback: () => void
+  /** Application commands such as Settings should work while typing. */
+  allowInTextInput?: boolean
+}
 
 export interface ShortcutMap {
-  [key: string]: () => void
+  [key: string]: (() => void) | ShortcutDefinition
 }
 
 /**
@@ -33,7 +39,9 @@ export interface ShortcutMap {
  * - Elements with contentEditable="true"
  * - Elements with role="textbox"
  */
-function isTextInput(element: HTMLElement | null): boolean {
+function isTextInput(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  const element = target.closest("input, textarea, [contenteditable='true'], [role='textbox']")
   if (!element) return false
 
   const tag = element.tagName.toLowerCase()
@@ -43,7 +51,7 @@ function isTextInput(element: HTMLElement | null): boolean {
     // Allow shortcuts on checkboxes, radio buttons, and buttons
     return !["checkbox", "radio", "submit", "button", "reset"].includes(inputType)
   }
-  if (element.isContentEditable) return true
+  if (element instanceof HTMLElement && element.isContentEditable) return true
   if (element.getAttribute("role") === "textbox") return true
 
   return false
@@ -73,13 +81,13 @@ function hasPlatformModifierKey(event: KeyboardEvent): boolean {
  * - User is composing text via IME (Chinese/Japanese/Korean input methods)
  */
 export function useGlobalShortcut(shortcuts: ShortcutMap): void {
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      // Suppress shortcuts when user is typing in a text input field
-      if (isTextInput(document.activeElement as HTMLElement | null)) {
-        return
-      }
+  const shortcutsRef = useRef(shortcuts)
+  useEffect(() => {
+    shortcutsRef.current = shortcuts
+  }, [shortcuts])
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       // Suppress shortcuts during IME composition (e.g., typing Chinese characters)
       // Check both modern isComposing and legacy keyCode 229 signal (matches isImeComposing pattern)
       if (event.isComposing || event.keyCode === 229) {
@@ -88,8 +96,14 @@ export function useGlobalShortcut(shortcuts: ShortcutMap): void {
 
       // Check if the pressed key has a registered shortcut
       const key = event.key.toLowerCase()
-      const callback = shortcuts[key]
-      if (!callback) return
+      const definition = shortcutsRef.current[key]
+      if (!definition) return
+      const callback = typeof definition === "function" ? definition : definition.callback
+      const allowInTextInput = typeof definition === "function"
+        ? false
+        : definition.allowInTextInput === true
+
+      if (!allowInTextInput && isTextInput(event.target)) return
 
       // Require platform-appropriate modifier key (Cmd on macOS, Ctrl on others)
       // This prevents triggering shortcuts during normal typing
@@ -98,14 +112,11 @@ export function useGlobalShortcut(shortcuts: ShortcutMap): void {
       // Prevent default browser behavior and execute the callback
       event.preventDefault()
       callback()
-    },
-    [shortcuts],
-  )
+    }
 
-  useEffect(() => {
     window.addEventListener("keydown", handleKeyDown)
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
     }
-  }, [handleKeyDown])
+  }, [])
 }

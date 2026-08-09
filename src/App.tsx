@@ -129,7 +129,10 @@ function App() {
   // Register global keyboard shortcuts
   // Cmd+, on macOS or Ctrl+, on Windows/Linux opens settings
   useGlobalShortcut({
-    ",": () => setActiveView("settings"),
+    ",": {
+      callback: () => setActiveView("settings"),
+      allowInTextInput: true,
+    },
   })
 
   useEffect(() => {
