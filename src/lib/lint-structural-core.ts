@@ -16,6 +16,12 @@ export interface StructuralLintFinding {
   suggestedSource?: string
 }
 
+export interface StructuralLintConfig {
+  ignoreOrphan?: boolean
+  ignoreNoOutlinks?: boolean
+  ignorePages?: string[]
+}
+
 interface IndexedPage extends StructuralLintPage {
   tokenSet: Set<string>
 }
@@ -96,6 +102,7 @@ function topCandidates(scores: Map<number, number>, excluded: number): number[] 
 export function computeStructuralLint(
   rawPages: StructuralLintPage[],
   onProgress?: (completed: number, total: number) => void,
+  config: StructuralLintConfig = {},
 ): StructuralLintFinding[] {
   const pages: IndexedPage[] = rawPages.map((page) => ({ ...page, tokenSet: new Set(page.tokens) }))
   const slugMap = new Map<string, number>()
@@ -172,8 +179,12 @@ export function computeStructuralLint(
   }
 
   const results: StructuralLintFinding[] = []
+  const ignoredPages = new Set((config.ignorePages ?? []).map(normalizeTarget).filter(Boolean))
   pages.forEach((page, pageIndex) => {
-    if (!inboundCounts.has(pageIndex)) {
+    const pageKeys = [page.slug, page.shortName, fileName(page.shortName).replace(/\.md$/i, "")]
+      .map(normalizeTarget)
+    const ignored = pageKeys.some((key) => ignoredPages.has(key))
+    if (!ignored && !config.ignoreOrphan && !inboundCounts.has(pageIndex)) {
       results.push({
         type: "orphan",
         severity: "info",
@@ -182,7 +193,7 @@ export function computeStructuralLint(
         suggestedSource: relatedCandidate(pageIndex, "source")?.shortName,
       })
     }
-    if (page.outlinks.length === 0) {
+    if (!ignored && !config.ignoreNoOutlinks && page.outlinks.length === 0) {
       results.push({
         type: "no-outlinks",
         severity: "info",
@@ -191,7 +202,7 @@ export function computeStructuralLint(
         suggestedTarget: relatedCandidate(pageIndex, "target")?.shortName,
       })
     }
-    for (const link of page.outlinks) {
+    for (const link of ignored ? [] : page.outlinks) {
       const basename = fileName(link).replace(/\.md$/i, "")
       if (slugMap.has(normalizeTarget(link)) || slugMap.has(normalizeTarget(basename))) continue
       results.push({

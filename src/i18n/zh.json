@@ -361,6 +361,13 @@
   "lint": {
     "title": "Wiki 检查",
     "semantic": "语义检查 (LLM)",
+    "ruleSettings": "检查规则",
+    "ignoreOrphan": "不报告孤立页面",
+    "ignoreNoOutlinks": "不报告无出链页面",
+    "ignorePages": "忽略的页面（每行一个 slug 或路径）",
+    "ignorePagesPlaceholder": "archive/legacy-page\nintentional-leaf",
+    "saveRules": "保存规则",
+    "savingRules": "保存中……",
     "running": "检查中...",
     "cancel": "取消检查",
     "cancelProgress": "取消 {{completed}}/{{total}}",

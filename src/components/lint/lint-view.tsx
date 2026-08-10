@@ -11,6 +11,7 @@ import {
   Wrench,
   Trash2,
   Link,
+  Settings2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -28,6 +29,12 @@ import {
 } from "@/lib/lint-fixes"
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
+import {
+  DEFAULT_LINT_CONFIG,
+  loadLintConfig,
+  saveLintConfig,
+  type LintConfig,
+} from "@/lib/lint-config"
 
 export function groupLintResultsForDisplay(results: readonly LintItem[]): {
   warnings: LintItem[]
@@ -75,6 +82,11 @@ export function LintView() {
   const [lintProgress, setLintProgress] = useState<{ completed: number; total: number } | null>(null)
   const [hasRun, setHasRun] = useState(false)
   const [runSemantic, setRunSemantic] = useState(false)
+  const [showRuleSettings, setShowRuleSettings] = useState(false)
+  const [lintConfig, setLintConfig] = useState<LintConfig>(DEFAULT_LINT_CONFIG)
+  const [ignoredPagesDraft, setIgnoredPagesDraft] = useState("")
+  const [savingConfig, setSavingConfig] = useState(false)
+  const [configError, setConfigError] = useState<string | null>(null)
   const [fixingId, setFixingId] = useState<string | null>(null)
   const [batchFixing, setBatchFixing] = useState(false)
   const [fixError, setFixError] = useState<string | null>(null)
@@ -82,6 +94,46 @@ export function LintView() {
   const lintAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => () => lintAbortRef.current?.abort(), [])
+
+  useEffect(() => {
+    let active = true
+    if (!project) {
+      setLintConfig(DEFAULT_LINT_CONFIG)
+      setIgnoredPagesDraft("")
+      return () => { active = false }
+    }
+    const projectPath = project.path
+    void loadLintConfig(projectPath).then((config) => {
+      if (!active || useWikiStore.getState().project?.path !== projectPath) return
+      setLintConfig(config)
+      setIgnoredPagesDraft(config.ignorePages.join("\n"))
+      setConfigError(null)
+    })
+    return () => { active = false }
+  }, [project])
+
+  const handleSaveLintConfig = useCallback(async () => {
+    if (!project || savingConfig) return
+    const projectPath = project.path
+    setSavingConfig(true)
+    setConfigError(null)
+    try {
+      const saved = await saveLintConfig(projectPath, {
+        ...lintConfig,
+        ignorePages: ignoredPagesDraft.split(/[,，\n]/),
+      })
+      if (useWikiStore.getState().project?.path !== projectPath) return
+      setLintConfig(saved)
+      setIgnoredPagesDraft(saved.ignorePages.join("\n"))
+      setShowRuleSettings(false)
+    } catch (error) {
+      if (useWikiStore.getState().project?.path === projectPath) {
+        setConfigError(String(error))
+      }
+    } finally {
+      if (useWikiStore.getState().project?.path === projectPath) setSavingConfig(false)
+    }
+  }, [ignoredPagesDraft, lintConfig, project, savingConfig])
 
   const handleRunLint = useCallback(async () => {
     if (!project || running) return
@@ -96,6 +148,10 @@ export function LintView() {
     try {
       const structural = await runStructuralLint(pp, {
         signal: controller.signal,
+        config: {
+          ...lintConfig,
+          ignorePages: ignoredPagesDraft.split(/[,，\n]/),
+        },
         onProgress: (completed, total) => setLintProgress({ completed, total }),
       })
       let all = structural
@@ -116,7 +172,16 @@ export function LintView() {
       setRunning(false)
       setLintProgress(null)
     }
-  }, [project, llmConfig, running, runSemantic, addLintItems, clearLintItems])
+  }, [
+    project,
+    llmConfig,
+    lintConfig,
+    ignoredPagesDraft,
+    running,
+    runSemantic,
+    addLintItems,
+    clearLintItems,
+  ])
 
   async function handleOpenPage(page: string) {
     if (!project) return
@@ -395,6 +460,15 @@ export function LintView() {
     <div className="flex h-full flex-col">
       <div className="shrink-0 flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
+          <Button
+            size="icon-sm"
+            variant={showRuleSettings ? "secondary" : "ghost"}
+            onClick={() => setShowRuleSettings((value) => !value)}
+            title={t("lint.ruleSettings")}
+            aria-label={t("lint.ruleSettings")}
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+          </Button>
           <h2 className="text-sm font-semibold">{t("lint.title")}</h2>
           {showResults && items.length > 0 && (
             <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
@@ -427,6 +501,49 @@ export function LintView() {
           </Button>
         </div>
       </div>
+
+      {showRuleSettings && (
+        <div className="shrink-0 space-y-3 border-b bg-muted/20 px-4 py-3 text-xs">
+          <div className="font-medium">{t("lint.ruleSettings")}</div>
+          <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={lintConfig.ignoreOrphan}
+              onChange={(event) => setLintConfig((config) => ({
+                ...config,
+                ignoreOrphan: event.target.checked,
+              }))}
+            />
+            {t("lint.ignoreOrphan")}
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={lintConfig.ignoreNoOutlinks}
+              onChange={(event) => setLintConfig((config) => ({
+                ...config,
+                ignoreNoOutlinks: event.target.checked,
+              }))}
+            />
+            {t("lint.ignoreNoOutlinks")}
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-muted-foreground">{t("lint.ignorePages")}</span>
+            <textarea
+              value={ignoredPagesDraft}
+              onChange={(event) => setIgnoredPagesDraft(event.target.value)}
+              placeholder={t("lint.ignorePagesPlaceholder")}
+              className="min-h-20 w-full resize-y rounded border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+            />
+          </label>
+          {configError && <p className="text-destructive">{configError}</p>}
+          <div className="flex justify-end">
+            <Button size="sm" onClick={handleSaveLintConfig} disabled={savingConfig}>
+              {savingConfig ? t("lint.savingRules") : t("lint.saveRules")}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {items.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-4 py-2 text-xs">

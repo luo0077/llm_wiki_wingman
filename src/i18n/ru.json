@@ -361,6 +361,13 @@
   "lint": {
     "title": "Проверка вики",
     "semantic": "Семантическая (LLM)",
+    "ruleSettings": "Правила проверки",
+    "ignoreOrphan": "Не сообщать об изолированных страницах",
+    "ignoreNoOutlinks": "Не сообщать о страницах без исходящих ссылок",
+    "ignorePages": "Игнорируемые страницы (один slug или путь на строку)",
+    "ignorePagesPlaceholder": "archive/legacy-page\nintentional-leaf",
+    "saveRules": "Сохранить правила",
+    "savingRules": "Сохранение...",
     "running": "Выполняется...",
     "cancel": "Отменить проверку",
     "cancelProgress": "Отменить {{completed}}/{{total}}",

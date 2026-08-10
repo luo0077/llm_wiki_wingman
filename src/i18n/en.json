@@ -361,6 +361,13 @@
   "lint": {
     "title": "Wiki Lint",
     "semantic": "Semantic (LLM)",
+    "ruleSettings": "Lint rules",
+    "ignoreOrphan": "Do not report orphan pages",
+    "ignoreNoOutlinks": "Do not report pages without outbound links",
+    "ignorePages": "Ignored pages (one slug or path per line)",
+    "ignorePagesPlaceholder": "archive/legacy-page\nintentional-leaf",
+    "saveRules": "Save rules",
+    "savingRules": "Saving...",
     "running": "Running...",
     "cancel": "Cancel check",
     "cancelProgress": "Cancel {{completed}}/{{total}}",
