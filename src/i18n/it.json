@@ -872,7 +872,13 @@
         },
         "history": {
           "title": "Cronologia delle versioni dei file",
-          "description": "Gli snapshot di rollback sono salvati in .llm-wiki/history. I file attuali non vengono conservati qui. L'app mantiene automaticamente al massimo 30 versioni per file e limita la dimensione totale della cronologia del progetto.",
+          "description": "Gli snapshot di rollback opzionali sono salvati in .llm-wiki/history. I file attuali non vengono conservati qui.",
+          "enabled": "Registra la cronologia versioni",
+          "enabledHint": "Disattivata per impostazione predefinita. Disattivarla interrompe i nuovi snapshot senza eliminare quelli esistenti.",
+          "retention": "Versioni conservate per file",
+          "retentionValue": "{{count}} / 30",
+          "retentionHint": "Scegli da 0 a 30 versioni. Impostando 0 si eliminano gli snapshot esistenti; quando la cronologia è attiva il valore predefinito è 10.",
+          "zeroConfirm": "Impostare le versioni conservate a 0 ed eliminare tutti gli snapshot esistenti? I file attuali del progetto non verranno eliminati.",
           "usage": "{{size}} in {{files}} file di cronologia ({{entries}} versioni)",
           "clear": "Cancella la cronologia delle versioni",
           "confirm": "Cancellare tutti gli snapshot di rollback di questo progetto? I file attuali del progetto non verranno eliminati."

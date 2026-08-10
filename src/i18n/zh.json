@@ -872,7 +872,13 @@
         },
         "history": {
           "title": "文件版本历史",
-          "description": "回滚快照保存在 .llm-wiki/history，当前文件不存放在这里。应用会为每个文件最多保留 30 个版本，并限制项目历史的总容量。",
+          "description": "可选的回滚快照保存在 .llm-wiki/history，当前文件不存放在这里。",
+          "enabled": "记录文件版本历史",
+          "enabledHint": "默认关闭。关闭后仅停止生成新快照，不会删除已有历史。",
+          "retention": "每个文件保留版本数",
+          "retentionValue": "{{count}} / 30",
+          "retentionHint": "可设置为 0–30。设为 0 会清除已有快照；启用历史时默认保留 10 个版本。",
+          "zeroConfirm": "确定将保留版本数设为 0 并删除全部已有回滚快照吗？当前项目文件不会被删除。",
           "usage": "{{files}} 个历史文件、{{entries}} 个版本，共占用 {{size}}",
           "clear": "清空版本历史",
           "confirm": "确定清空此项目的全部回滚快照吗？当前项目文件不会被删除。"

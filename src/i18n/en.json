@@ -872,7 +872,13 @@
         },
         "history": {
           "title": "File version history",
-          "description": "Rollback snapshots are stored in .llm-wiki/history. Current files are not stored here. The app automatically retains at most 30 versions per file and bounds total project history size.",
+          "description": "Optional rollback snapshots are stored in .llm-wiki/history. Current files are not stored here.",
+          "enabled": "Record file version history",
+          "enabledHint": "Disabled by default. Turning it off stops new snapshots without deleting existing history.",
+          "retention": "Versions retained per file",
+          "retentionValue": "{{count}} / 30",
+          "retentionHint": "Choose 0–30 versions. Setting this to 0 removes existing snapshots; the default is 10 when history is enabled.",
+          "zeroConfirm": "Set retained versions to 0 and delete all existing rollback snapshots? Current project files will not be deleted.",
           "usage": "{{size}} across {{files}} history files ({{entries}} versions)",
           "clear": "Clear version history",
           "confirm": "Clear all rollback snapshots for this project? Current project files will not be deleted."
