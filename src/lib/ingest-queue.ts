@@ -33,6 +33,8 @@ interface ActiveIngestRun {
   controller: AbortController
   writtenFiles: string[]
   releaseCommitTurn: () => void
+  commitActive: boolean
+  completion: Promise<void>
 }
 
 const activeRuns = new Map<string, ActiveIngestRun>()
@@ -238,12 +240,14 @@ function upsertQueuedIngestTask(
 }
 
 /**
- * Delete files written by a cancelled / failed ingest, AND drop the
- * matching pages' chunks from LanceDB. Called from the cancel paths
- * (cancelTask, cancelAllTasks).
+ * Explicitly delete wiki files and their matching LanceDB chunks.
+ *
+ * Cancellation deliberately does not call this helper: written paths may be
+ * pre-existing pages merged in place, and deleting them without snapshots
+ * would destroy user data.
  *
  * Per-file errors are swallowed (best-effort cleanup) — a missing
- * file or LanceDB unavailable shouldn't abort the cancel flow.
+ * file or LanceDB unavailable shouldn't abort the caller's cleanup flow.
  * Structural pages (index/log/overview) aren't embedded, so the
  * cascade no-ops for them.
  */
@@ -385,13 +389,14 @@ export async function enqueueInactiveProjectBatch(
 }
 
 /**
- * Retry a failed task. Only valid for tasks in the active project's
- * queue.
+ * Retry a failed or cancelled task. Only valid for stopped tasks in the
+ * active project's queue.
  */
 export async function retryTask(taskId: string): Promise<void> {
   const task = queue.find((t) => t.id === taskId)
   if (!task) return
   if (task.projectId !== currentProjectId) return
+  if (task.status !== "failed" && task.status !== "cancelled") return
 
   restoredPausedTaskIds.delete(task.id)
   task.status = "pending"
@@ -479,8 +484,9 @@ export async function movePendingTask(
 }
 
 /**
- * Cancel a pending or processing task.
- * If processing, aborts the LLM call and cleans up generated files.
+ * Cancel a pending or processing task. Processing work is aborted, while any
+ * completed atomic page writes are preserved because they may be merges into
+ * pre-existing user content.
  */
 export async function cancelTask(taskId: string): Promise<void> {
   const task = queue.find((t) => t.id === taskId)
@@ -492,12 +498,6 @@ export async function cancelTask(taskId: string): Promise<void> {
     cancelledInFlightTaskIds.add(task.id)
     const run = activeRuns.get(task.id)
     run?.controller.abort()
-    if (run && run.writtenFiles.length > 0) {
-      await cleanupWrittenFiles(currentProjectPath, run.writtenFiles)
-      console.log(`[Ingest Queue] Cleaned up ${run.writtenFiles.length} files from cancelled task`)
-      run.writtenFiles = []
-    }
-
   }
 
   restoredPausedTaskIds.delete(taskId)
@@ -531,10 +531,6 @@ export async function cancelTasks(taskIds: readonly string[]): Promise<number> {
   for (const task of targets) {
     const run = activeRuns.get(task.id)
     run?.controller.abort()
-    if (run && run.writtenFiles.length > 0) {
-      await cleanupWrittenFiles(currentProjectPath, run.writtenFiles)
-      run.writtenFiles = []
-    }
   }
   for (const task of targets) {
     restoredPausedTaskIds.delete(task.id)
@@ -583,10 +579,6 @@ export async function discardTasksForSources(
   for (const task of targets) {
     const run = activeRuns.get(task.id)
     run?.controller.abort()
-    if (run && run.writtenFiles.length > 0) {
-      await cleanupWrittenFiles(currentProjectPath, run.writtenFiles)
-      run.writtenFiles = []
-    }
   }
 
   queue = queue.filter((task) => !targetIds.has(task.id))
@@ -609,8 +601,8 @@ export async function clearCompletedTasks(): Promise<void> {
 
 /**
  * Cancel everything that's not finished in the active project's queue:
- * aborts the running task (if any), cleans up its partial output, and
- * retains every pending + processing item as cancelled so it can be restarted.
+ * aborts running tasks and retains every pending + processing item as
+ * cancelled so it can be restarted.
  *
  * Failed tasks are retained so the user can still see / retry them.
  * Returns the number of tasks removed from the queue.
@@ -626,10 +618,6 @@ export async function cancelAllTasks(): Promise<number> {
   }
   for (const run of activeRuns.values()) {
     run.controller.abort()
-    if (run.writtenFiles.length > 0) {
-      await cleanupWrittenFiles(currentProjectPath, run.writtenFiles)
-      run.writtenFiles = []
-    }
   }
 
   let cancelled = 0
@@ -788,7 +776,8 @@ export async function pauseQueue(): Promise<void> {
   const pausedProjectPath = currentProjectPath
   queueEpoch += 1
 
-  for (const run of activeRuns.values()) {
+  const runs = [...activeRuns.values()]
+  for (const run of runs) {
     run.controller.abort()
     run.releaseCommitTurn()
   }
@@ -796,8 +785,16 @@ export async function pauseQueue(): Promise<void> {
     sweepAbortController.abort()
     sweepAbortController = null
   }
-  activeRuns.clear()
   scheduling = false
+
+  // Preparation is safe to abandon after abort, but a commit may already be
+  // inside a filesystem operation that cannot observe AbortSignal. Wait only
+  // for those active commits before declaring the project switch complete.
+  const committingRuns = runs.filter((run) => run.commitActive)
+  if (committingRuns.length > 0) {
+    await Promise.allSettled(committingRuns.map((run) => run.completion))
+  }
+  activeRuns.clear()
 
   // Revert any in-flight processing task back to pending so when the
   // user returns to this project, the task is re-tried from scratch.
@@ -978,10 +975,9 @@ async function runTask(
 
     const currentTask = queue.find((candidate) => candidate.id === task.id)
     if (cancelledInFlightTaskIds.delete(task.id) || currentTask?.status === "cancelled") {
-      if (run.writtenFiles.length > 0) {
-        await cleanupWrittenFiles(projectPath, run.writtenFiles)
-        run.writtenFiles = []
-      }
+      // Written paths may be pre-existing pages that were merged in place.
+      // Without a reliable old-content snapshot, deleting them would be data
+      // loss. Keep completed atomic writes and let a retry converge via merge.
       await saveQueue(projectPath)
       return
     }
@@ -997,18 +993,10 @@ async function runTask(
     if (currentProjectId !== projectId || run.epoch !== queueEpoch) return
     const currentTask = queue.find((candidate) => candidate.id === task.id)
     if (cancelledInFlightTaskIds.delete(task.id) || currentTask?.status === "cancelled") {
-      if (run.writtenFiles.length > 0) {
-        await cleanupWrittenFiles(projectPath, run.writtenFiles)
-        run.writtenFiles = []
-      }
       await saveQueue(projectPath)
       return
     }
     if (currentTask?.status === "pending") {
-      if (run.writtenFiles.length > 0) {
-        await cleanupWrittenFiles(projectPath, run.writtenFiles)
-        run.writtenFiles = []
-      }
       await saveQueue(projectPath)
       return
     }
@@ -1078,6 +1066,8 @@ async function startTask(projectId: string, task: IngestTask): Promise<boolean> 
     controller: new AbortController(),
     writtenFiles: [],
     releaseCommitTurn: reservation.release,
+    commitActive: false,
+    completion: Promise.resolve(),
   }
   restoredPausedTaskIds.delete(task.id)
   task.status = "processing"
@@ -1091,7 +1081,16 @@ async function startTask(projectId: string, task: IngestTask): Promise<boolean> 
   }
 
   console.log(`[Ingest Queue] Processing: ${task.sourcePath} (${queue.filter((candidate) => candidate.projectId === projectId && candidate.status === "pending").length} remaining)`)
-  void runTask(projectId, projectPath, task, run, reservation.runCommit)
+  const orderedCommit: typeof reservation.runCommit = (operation) =>
+    reservation.runCommit(async () => {
+      run.commitActive = true
+      try {
+        return await operation()
+      } finally {
+        run.commitActive = false
+      }
+    })
+  run.completion = runTask(projectId, projectPath, task, run, orderedCommit)
   return true
 }
 
@@ -1105,6 +1104,7 @@ async function processNext(projectId: string): Promise<void> {
       const next = queue.find((task) =>
         task.projectId === projectId &&
         task.status === "pending" &&
+        !activeRuns.has(task.id) &&
         !restoredPausedTaskIds.has(task.id)
       )
       if (!next) break
@@ -1114,6 +1114,7 @@ async function processNext(projectId: string): Promise<void> {
     const hasRunnablePending = queue.some((task) =>
       task.projectId === projectId &&
       task.status === "pending" &&
+      !activeRuns.has(task.id) &&
       !restoredPausedTaskIds.has(task.id)
     )
     const hasRestoredPending = queue.some((task) =>
@@ -1132,6 +1133,7 @@ async function processNext(projectId: string): Promise<void> {
     const hasRunnable = queue.some((task) =>
       task.projectId === projectId &&
       task.status === "pending" &&
+      !activeRuns.has(task.id) &&
       !restoredPausedTaskIds.has(task.id)
     )
     const hasAnyPending = queue.some((task) =>
