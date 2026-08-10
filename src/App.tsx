@@ -13,6 +13,7 @@ import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, load
 import { loadReviewItems, loadLintItems, loadChatHistory, loadChatPreferences } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
 import { startClipWatcher } from "@/lib/clip-watcher"
+import { DEFAULT_SOURCE_WATCH_CONFIG } from "@/lib/source-watch-config"
 import { useGlobalShortcut } from "@/hooks/use-global-shortcut"
 import { AppLayout } from "@/components/layout/app-layout"
 import { WelcomeScreen } from "@/components/project/welcome-screen"
@@ -466,6 +467,21 @@ function App() {
       // Bump data version so any cached graphs/views invalidate
       useWikiStore.getState().bumpDataVersion()
       await saveLastProject(proj)
+
+      // Apply the project-specific worker limit before restoring its queue so
+      // newly enqueued tasks never start with another project's concurrency.
+      const { setIngestWorkerLimit } = await import("@/lib/ingest-queue")
+      try {
+        const config = await loadSourceWatchConfig(proj.id)
+        if (!isCurrentProject(proj)) return
+        useWikiStore.getState().setSourceWatchConfig(config)
+        setIngestWorkerLimit(config.ingestConcurrency)
+      } catch (err) {
+        console.error("Failed to load ingest concurrency:", err)
+        if (!isCurrentProject(proj)) return
+        useWikiStore.getState().setSourceWatchConfig(DEFAULT_SOURCE_WATCH_CONFIG)
+        setIngestWorkerLimit(DEFAULT_SOURCE_WATCH_CONFIG.ingestConcurrency)
+      }
 
       // Restore ingest queue (resume interrupted tasks). Keyed by the
       // project's stable UUID so the queue still finds the right project

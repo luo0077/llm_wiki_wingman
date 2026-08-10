@@ -72,6 +72,7 @@ import {
   resumeProcessing,
   isQueuePaused,
   setIngestWorkerLimit,
+  getIngestWorkerLimit,
 } from "./ingest-queue"
 import { autoIngest } from "./ingest"
 import { readFile, writeFile } from "@/commands/fs"
@@ -118,6 +119,15 @@ beforeEach(async () => {
 })
 
 describe("ingest-queue — enqueue & basic processing", () => {
+  it("clamps the configurable worker limit", () => {
+    setIngestWorkerLimit(0)
+    expect(getIngestWorkerLimit()).toBe(1)
+    setIngestWorkerLimit(99)
+    expect(getIngestWorkerLimit()).toBe(5)
+    setIngestWorkerLimit(2.9)
+    expect(getIngestWorkerLimit()).toBe(2)
+  })
+
   it("persists inactive-project tasks and starts them when that project opens", async () => {
     const ids = await enqueueInactiveProjectBatch(TEST_ID_B, TEST_PATH_B, [
       {
