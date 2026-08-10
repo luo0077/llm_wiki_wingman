@@ -4,7 +4,7 @@
     "subtitle": "Costruisci e mantieni la tua knowledge base personale con gli LLM"
   },
   "common": {
-    "retry": "Riprova", "cancel": "Annulla", "ignore": "Ignora", "close": "Chiudi",
+    "retry": "Riprova", "cancel": "Annulla", "ignore": "Ignora", "close": "Chiudi", "ok": "OK", "confirm": "Conferma", "notice": "Avviso",
     "dismiss": "Nascondi", "loading": "Caricamento...", "optional": "opzionale"
   },
   "layout": { "showSidebar": "Mostra la barra laterale", "hideSidebar": "Nascondi la barra laterale" },

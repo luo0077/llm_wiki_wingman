@@ -19,12 +19,14 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { WelcomeScreen } from "@/components/project/welcome-screen"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 import type { WikiProject } from "@/types/wiki"
+import { useAppDialog } from "@/stores/app-dialog-store"
 
 function applyDocumentZoom(level: number) {
   document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * level}px`
 }
 
 function App() {
+  const appDialog = useAppDialog()
   const project = useWikiStore((s) => s.project)
   const setProject = useWikiStore((s) => s.setProject)
   const setFileTree = useWikiStore((s) => s.setFileTree)
@@ -566,7 +568,7 @@ function App() {
       const validated = await openProject(proj.path)
       await handleProjectOpened(validated)
     } catch (err) {
-      window.alert(`Failed to open project: ${err}`)
+      await appDialog.alert({ message: `Failed to open project: ${err}` })
     }
   }
 
@@ -581,7 +583,7 @@ function App() {
       const proj = await openProject(selected)
       await handleProjectOpened(proj)
     } catch (err) {
-      window.alert(`Failed to open project: ${err}`)
+      await appDialog.alert({ message: `Failed to open project: ${err}` })
     }
   }
 

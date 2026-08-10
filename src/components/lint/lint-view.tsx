@@ -27,6 +27,7 @@ import {
   rewriteWikilinkTarget,
 } from "@/lib/lint-fixes"
 import { useTranslation } from "react-i18next"
+import { useAppDialog } from "@/stores/app-dialog-store"
 
 export function groupLintResultsForDisplay(results: readonly LintItem[]): {
   warnings: LintItem[]
@@ -52,6 +53,7 @@ export function shouldShowLintResults(hasRun: boolean, itemCount: number): boole
 
 export function LintView() {
   const { t } = useTranslation()
+  const appDialog = useAppDialog()
   const project = useWikiStore((s) => s.project)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const openFileInPreview = useWikiStore((s) => s.openFileInPreview)
@@ -255,7 +257,10 @@ export function LintView() {
     if (!project) return
     const pp = normalizePath(project.path)
     const pagePath = `${pp}/wiki/${item.page}`
-    const confirmed = window.confirm(t("lint.deleteOrphanConfirm", { page: item.page }))
+    const confirmed = await appDialog.confirm({
+      message: t("lint.deleteOrphanConfirm", { page: item.page }),
+      variant: "destructive",
+    })
     if (!confirmed) return
 
     try {

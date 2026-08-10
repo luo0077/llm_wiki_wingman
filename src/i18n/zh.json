@@ -4,7 +4,7 @@
     "subtitle": "用 LLM 构建和维护你的个人知识库"
   },
   "common": {
-    "retry": "重试", "cancel": "取消", "ignore": "忽略", "close": "关闭",
+    "retry": "重试", "cancel": "取消", "ignore": "忽略", "close": "关闭", "ok": "确定", "confirm": "确认", "notice": "提示",
     "dismiss": "关闭", "loading": "加载中……", "optional": "可选"
   },
   "layout": { "showSidebar": "展开侧栏", "hideSidebar": "收起侧栏" },

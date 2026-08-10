@@ -4,7 +4,7 @@
     "subtitle": "Build and maintain your personal knowledge base with LLMs"
   },
   "common": {
-    "retry": "Retry", "cancel": "Cancel", "ignore": "Ignore", "close": "Close",
+    "retry": "Retry", "cancel": "Cancel", "ignore": "Ignore", "close": "Close", "ok": "OK", "confirm": "Confirm", "notice": "Notice",
     "dismiss": "Dismiss", "loading": "Loading...", "optional": "optional"
   },
   "layout": { "showSidebar": "Show sidebar", "hideSidebar": "Hide sidebar" },
