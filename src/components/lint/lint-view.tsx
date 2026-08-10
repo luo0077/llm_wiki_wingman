@@ -97,9 +97,14 @@ export function LintView() {
 
   useEffect(() => {
     let active = true
+    // Do not expose the previous project's draft while this project's config
+    // is loading, and do not carry a completed save's busy state across a
+    // project switch.
+    setLintConfig(DEFAULT_LINT_CONFIG)
+    setIgnoredPagesDraft("")
+    setSavingConfig(false)
+    setConfigError(null)
     if (!project) {
-      setLintConfig(DEFAULT_LINT_CONFIG)
-      setIgnoredPagesDraft("")
       return () => { active = false }
     }
     const projectPath = project.path

@@ -23,7 +23,7 @@ export function AppDialogHost() {
       key={current.id}
       open
       onOpenChange={(open) => {
-        if (!open) settle(false)
+        if (!open) settle(current.id, false)
       }}
     >
       <DialogContent showCloseButton={false}>
@@ -37,13 +37,13 @@ export function AppDialogHost() {
         </DialogHeader>
         <DialogFooter>
           {current.kind === "confirm" && (
-            <Button variant="outline" onClick={() => settle(false)}>
+            <Button variant="outline" onClick={() => settle(current.id, false)}>
               {current.cancelLabel ?? t("common.cancel")}
             </Button>
           )}
           <Button
             variant={destructive ? "destructive" : "default"}
-            onClick={() => settle(true)}
+            onClick={() => settle(current.id, true)}
             autoFocus
           >
             {current.confirmLabel ?? t("common.ok")}

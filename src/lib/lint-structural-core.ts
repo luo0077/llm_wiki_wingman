@@ -181,7 +181,9 @@ export function computeStructuralLint(
   const results: StructuralLintFinding[] = []
   const ignoredPages = new Set((config.ignorePages ?? []).map(normalizeTarget).filter(Boolean))
   pages.forEach((page, pageIndex) => {
-    const pageKeys = [page.slug, page.shortName, fileName(page.shortName).replace(/\.md$/i, "")]
+    // Ignore entries are slugs/paths. Do not match a bare basename against
+    // every nested page with that name ("foo" must not hide "archive/foo").
+    const pageKeys = [page.slug, page.shortName]
       .map(normalizeTarget)
     const ignored = pageKeys.some((key) => ignoredPages.has(key))
     if (!ignored && !config.ignoreOrphan && !inboundCounts.has(pageIndex)) {

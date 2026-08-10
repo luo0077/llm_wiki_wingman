@@ -20,7 +20,7 @@ interface AppDialogState {
   current: DialogRequest | null
   queue: DialogRequest[]
   enqueue: (request: DialogRequest) => void
-  settle: (value: boolean) => void
+  settle: (requestId: number, value: boolean) => void
 }
 
 export const useAppDialogStore = create<AppDialogState>((set, get) => ({
@@ -33,9 +33,12 @@ export const useAppDialogStore = create<AppDialogState>((set, get) => ({
     }
     set((state) => ({ queue: [...state.queue, request] }))
   },
-  settle: (value) => {
+  settle: (requestId, value) => {
     const { current, queue } = get()
-    if (!current) return
+    // Events from a dialog that has just been replaced can arrive late (for
+    // example a double-click or a closing transition). Never let an old host
+    // settle the next queued confirmation.
+    if (!current || current.id !== requestId) return
     const [next, ...rest] = queue
     set({ current: next ?? null, queue: rest })
     current.resolve(value)

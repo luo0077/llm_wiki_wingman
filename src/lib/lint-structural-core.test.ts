@@ -56,4 +56,15 @@ describe("computeStructuralLint", () => {
     expect(findings.some((finding) => finding.page === "folder/ignored.md")).toBe(false)
     expect(findings.some((finding) => finding.type === "broken-link" && finding.brokenTarget === "folder/ignored")).toBe(false)
   })
+
+  it("does not apply a top-level ignored slug to same-named nested pages", () => {
+    const pages = [
+      { ...page(0, 2), shortName: "foo.md", slug: "foo", outlinks: [] },
+      { ...page(1, 2), shortName: "archive/foo.md", slug: "archive/foo", outlinks: [] },
+    ]
+    const findings = computeStructuralLint(pages, undefined, { ignorePages: ["foo"] })
+
+    expect(findings.some((finding) => finding.page === "foo.md")).toBe(false)
+    expect(findings.some((finding) => finding.page === "archive/foo.md")).toBe(true)
+  })
 })
