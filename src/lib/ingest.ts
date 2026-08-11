@@ -324,9 +324,9 @@ function resolveCaptionConfig(
     maxContextSize: mainLlm.maxContextSize,
   }
 }
-import { buildLanguageDirective } from "@/lib/output-language"
+import { buildLanguageDirective, getOutputLanguage } from "@/lib/output-language"
 import { detectLanguage } from "@/lib/detect-language"
-import { sameScriptFamily } from "@/lib/language-metadata"
+import { getLanguagePromptName, sameScriptFamily } from "@/lib/language-metadata"
 import {
   loadProjectWikiSchemaRouting,
   validateWikiPageRouting,
@@ -812,6 +812,7 @@ async function autoIngestImpl(
                     isSavedImagePromptUrl(pp, sourceSummarySlug, url),
                   urlToAbsPath: (url) => promptImageUrlToAbs(pp, url),
                   concurrency: mmCfg.concurrency,
+                  outputLanguage: getLanguagePromptName(getOutputLanguage(sourceContent)),
                   onProgress: (done, total) =>
                     activity.updateItem(activityId, {
                       detail: `Captioning images... ${done}/${total}`,
@@ -961,6 +962,7 @@ async function autoIngestImpl(
           shouldCaption: (url) => url.startsWith(ourMediaPrefix) || isSavedImagePromptUrl(pp, sourceSummarySlug, url),
           urlToAbsPath: (url) => promptImageUrlToAbs(pp, url),
           concurrency: mmCfg.concurrency,
+          outputLanguage: getLanguagePromptName(getOutputLanguage(enrichedSourceContent)),
           onProgress: (done, total) =>
             activity.updateItem(activityId, {
               detail: `Captioning images... ${done}/${total}`,

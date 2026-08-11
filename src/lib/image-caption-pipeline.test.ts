@@ -116,6 +116,23 @@ describe("captionMarkdownImages", () => {
     })
   })
 
+  it("forwards outputLanguage to captionImage", async () => {
+    mockReadBase64.mockResolvedValue({ base64: "AAAA", mimeType: "image/png" })
+    mockCaption.mockResolvedValue("ein rotes Quadrat")
+
+    await captionMarkdownImages("/proj", "![](/abs/img-1.png)", cfg, {
+      outputLanguage: "German",
+    })
+
+    expect(mockCaption).toHaveBeenCalledWith(
+      "AAAA",
+      "image/png",
+      cfg,
+      undefined,
+      expect.objectContaining({ outputLanguage: "German" }),
+    )
+  })
+
   it("dedupes by SHA-256: two refs to the same bytes → one LLM call, both rewritten", async () => {
     // Both URLs return the same base64 bytes — same hash → single
     // caption call, both alt-texts populated.
