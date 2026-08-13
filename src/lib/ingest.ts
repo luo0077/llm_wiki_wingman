@@ -1520,15 +1520,15 @@ export function rewriteIngestPathFromTitleForTargetLanguage(
   content: string,
   targetLang: string | undefined,
 ): string {
+  const title = extractGeneratedPageTitle(content)
   // "auto" (the default output language) means "follow the source", so resolve
-  // it from the page content. Without this, auto short-circuited here and
-  // Chinese/Japanese/Korean pages kept ASCII/pinyin filenames even though
-  // their titles and content were CJK, leaving the vault hard to browse.
-  // See issue #585.
-  const effectiveLang = !targetLang || targetLang === "auto"
-    ? detectLanguage(content)
-    : targetLang
-  if (!CJK_OUTPUT_LANGUAGES.has(effectiveLang)) {
+  // it from the generated title. The title is the filename authority; using
+  // the whole body lets large SQL/code blocks or English technical prose
+  // outweigh a short CJK title and silently retain an ASCII filename.
+  const shouldUseCjkFilename = !targetLang || targetLang === "auto"
+    ? Boolean(title && containsCjk(title))
+    : CJK_OUTPUT_LANGUAGES.has(targetLang)
+  if (!shouldUseCjkFilename) {
     return relativePath
   }
   if (
@@ -1538,7 +1538,6 @@ export function rewriteIngestPathFromTitleForTargetLanguage(
   ) {
     return relativePath
   }
-  const title = extractGeneratedPageTitle(content)
   if (!title || !containsCjk(title)) return relativePath
 
   const slash = relativePath.lastIndexOf("/")
@@ -2176,6 +2175,7 @@ export function buildAnalysisPrompt(
     "- What evidence supports them?",
     "- How strong is the evidence?",
     "- Which named subject is each claim about? Do not transfer claims, limits, or evaluations from one entity/model/product/method to another just because they share keywords.",
+    "- Preserve structured source data verbatim in the analysis when present: include SQL DDL / CREATE TABLE statements, schema definitions, API signatures, configuration, and tables in fenced code blocks or Markdown tables. Do not reduce exact field names, types, constraints, keys, or indexes to prose.",
     "",
     "## Connections to Existing Wiki",
     "- What existing pages does this source relate to?",
@@ -2812,6 +2812,7 @@ function buildChunkAnalysisSystemPrompt(
     "- New or updated concepts",
     "- Any schema-defined page types beyond entity/concept that the main chunk genuinely supports",
     "- Claims, findings, evidence, contradictions",
+    "- Exact structured data from this chunk, when present: preserve SQL DDL / CREATE TABLE statements, schema definitions, API signatures, configuration, and tables verbatim in fenced code blocks or Markdown tables; retain field names, types, constraints, keys, and indexes",
     "- Open questions or research gaps",
     "",
     "## Updated Global Digest",
