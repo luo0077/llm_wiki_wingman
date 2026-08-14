@@ -474,23 +474,16 @@ pub(crate) async fn vector_upsert_chunks_with_revision(
     project_path: &str,
     page_id: &str,
     chunks: Vec<ChunkUpsertInput>,
-    page_path: &str,
     fingerprint: &str,
 ) -> Result<(), String> {
-    vector_upsert_chunks_inner(
-        project_path,
-        page_id,
-        chunks,
-        Some((page_path, fingerprint)),
-    )
-    .await
+    vector_upsert_chunks_inner(project_path, page_id, chunks, Some(fingerprint)).await
 }
 
 async fn vector_upsert_chunks_inner(
     project_path: &str,
     page_id: &str,
     chunks: Vec<ChunkUpsertInput>,
-    revision: Option<(&str, &str)>,
+    revision: Option<&str>,
 ) -> Result<(), String> {
     validate_page_id_for_v2(&page_id)?;
     let lock = vectorstore_v2_lock(project_path);
@@ -542,9 +535,8 @@ async fn vector_upsert_chunks_inner(
             .map_err(|e| format!("Create table error: {e}"))?;
     }
 
-    if let Some((page_path, fingerprint)) = revision {
-        if let Err(err) = super::page_embedding::save_revision(project_path, page_path, fingerprint)
-        {
+    if let Some(fingerprint) = revision {
+        if let Err(err) = super::page_embedding::save_revision(project_path, page_id, fingerprint) {
             let _ = super::page_embedding::invalidate_page_revision(project_path, page_id);
             eprintln!("[page-embedding] failed to save revision metadata: {err}");
         }
@@ -558,14 +550,12 @@ async fn vector_upsert_chunks_inner(
 pub(crate) async fn vector_page_revision_match(
     project_path: &str,
     page_id: &str,
-    page_path: &str,
     fingerprint: &str,
 ) -> Result<Option<usize>, String> {
     validate_page_id_for_v2(page_id)?;
     let lock = vectorstore_v2_lock(project_path);
     let _guard = lock.read().await;
-    if super::page_embedding::load_revision(project_path, page_path).as_deref() != Some(fingerprint)
-    {
+    if super::page_embedding::load_revision(project_path, page_id).as_deref() != Some(fingerprint) {
         return Ok(None);
     }
 

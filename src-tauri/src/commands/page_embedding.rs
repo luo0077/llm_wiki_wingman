@@ -1,7 +1,5 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -22,8 +20,7 @@ const MAX_PAGE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PAGE_CHUNKS: usize = 512;
 const EMBEDDING_BATCH_SIZE: usize = 64;
 const PROVIDER_PHASE_TIMEOUT: Duration = Duration::from_secs(300);
-const REVISION_FILE: &str = ".llm-wiki/embedding-revisions.json";
-static REVISION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+const REVISION_DIR: &str = ".llm-wiki/embedding-revisions";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,14 +132,10 @@ pub async fn embed_wiki_page(
     let revision = format!("sha256:{:x}", Sha256::digest(content.as_bytes()));
     let fingerprint = embedding_fingerprint(&revision, &config);
     if !force {
-        let existing_chunks = vectorstore::vector_page_revision_match(
-            project_path,
-            &page_id,
-            &normalized_path,
-            &fingerprint,
-        )
-        .await
-        .map_err(|err| PageEmbeddingError::new(PageEmbeddingErrorKind::Storage, err))?;
+        let existing_chunks =
+            vectorstore::vector_page_revision_match(project_path, &page_id, &fingerprint)
+                .await
+                .map_err(|err| PageEmbeddingError::new(PageEmbeddingErrorKind::Storage, err))?;
         if let Some(existing_chunks) = existing_chunks {
             return Ok(PageEmbeddingResult {
                 path: normalized_path,
@@ -197,16 +190,11 @@ pub async fn embed_wiki_page(
             ),
         )
     })??;
+    validate_embedding_rows(&rows)?;
 
-    vectorstore::vector_upsert_chunks_with_revision(
-        project_path,
-        &page_id,
-        rows,
-        &normalized_path,
-        &fingerprint,
-    )
-    .await
-    .map_err(|err| PageEmbeddingError::new(PageEmbeddingErrorKind::Storage, err))?;
+    vectorstore::vector_upsert_chunks_with_revision(project_path, &page_id, rows, &fingerprint)
+        .await
+        .map_err(|err| PageEmbeddingError::new(PageEmbeddingErrorKind::Storage, err))?;
     Ok(PageEmbeddingResult {
         path: normalized_path,
         page_id,
@@ -215,6 +203,22 @@ pub async fn embed_wiki_page(
         vectors_written: chunks.len(),
         status: "indexed".to_string(),
     })
+}
+
+fn validate_embedding_rows(rows: &[ChunkUpsertInput]) -> Result<(), PageEmbeddingError> {
+    let Some(expected) = rows.first().map(|row| row.embedding.len()) else {
+        return Err(PageEmbeddingError::new(
+            PageEmbeddingErrorKind::Provider,
+            "Embedding provider returned no vectors",
+        ));
+    };
+    if expected == 0 || rows.iter().any(|row| row.embedding.len() != expected) {
+        return Err(PageEmbeddingError::new(
+            PageEmbeddingErrorKind::Provider,
+            "Embedding provider returned empty or inconsistent vector dimensions",
+        ));
+    }
+    Ok(())
 }
 
 async fn prepare_embedding_rows(
@@ -323,44 +327,33 @@ fn ensure_unique_page_stem(
     Ok(())
 }
 
-fn revision_path(project_path: &str) -> PathBuf {
-    Path::new(project_path).join(REVISION_FILE)
+fn revision_path(project_path: &str, page_id: &str) -> PathBuf {
+    let key = format!("{:x}", Sha256::digest(page_id.as_bytes()));
+    Path::new(project_path)
+        .join(REVISION_DIR)
+        .join(format!("{key}.revision"))
 }
 
-fn load_revisions(project_path: &str) -> BTreeMap<String, String> {
-    fs::read_to_string(revision_path(project_path))
+pub(crate) fn load_revision(project_path: &str, page_id: &str) -> Option<String> {
+    fs::read_to_string(revision_path(project_path, page_id))
         .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
-}
-
-pub(crate) fn load_revision(project_path: &str, page_path: &str) -> Option<String> {
-    let _guard = REVISION_LOCK.get_or_init(|| Mutex::new(())).lock().ok()?;
-    load_revisions(project_path).get(page_path).cloned()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn save_revision(
     project_path: &str,
-    page_path: &str,
+    page_id: &str,
     revision: &str,
 ) -> Result<(), String> {
-    let _guard = REVISION_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "Embedding revision lock is poisoned".to_string())?;
-    let path = revision_path(project_path);
+    let path = revision_path(project_path, page_id);
     let parent = path
         .parent()
         .ok_or_else(|| "Invalid embedding revision path".to_string())?;
     fs::create_dir_all(parent)
         .map_err(|err| format!("Failed to create revision directory: {err}"))?;
-    let mut revisions = load_revisions(project_path);
-    revisions.retain(|relative, _| Path::new(project_path).join(relative).is_file());
-    revisions.insert(page_path.to_string(), revision.to_string());
-    let serialized = serde_json::to_string_pretty(&revisions)
-        .map_err(|err| format!("Failed to serialize embedding revisions: {err}"))?;
     let temp = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-    fs::write(&temp, serialized)
+    fs::write(&temp, revision)
         .map_err(|err| format!("Failed to write embedding revision temp file: {err}"))?;
     if let Err(err) = fs::rename(&temp, &path) {
         // Windows does not replace an existing destination. The metadata is
@@ -387,26 +380,11 @@ pub(crate) fn save_revision(
 }
 
 pub(crate) fn invalidate_page_revision(project_path: &str, page_id: &str) -> Result<(), String> {
-    let _guard = REVISION_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "Embedding revision lock is poisoned".to_string())?;
-    let path = revision_path(project_path);
-    let mut revisions = load_revisions(project_path);
-    let original_len = revisions.len();
-    revisions.retain(|relative, _| {
-        Path::new(relative)
-            .file_stem()
-            .and_then(|value| value.to_str())
-            != Some(page_id)
-    });
-    if revisions.len() == original_len {
-        return Ok(());
+    match fs::remove_file(revision_path(project_path, page_id)) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("Failed to invalidate embedding revision: {err}")),
     }
-    let serialized = serde_json::to_string_pretty(&revisions)
-        .map_err(|err| format!("Failed to serialize embedding revisions: {err}"))?;
-    fs::write(path, serialized)
-        .map_err(|err| format!("Failed to invalidate embedding revision: {err}"))
 }
 
 fn resolve_wiki_markdown_path(
@@ -530,6 +508,9 @@ fn find_frontmatter_close(rest: &str) -> Option<(usize, usize)> {
     (rest.trim() == "---").then_some((0, rest.len()))
 }
 
+// The regular ingest pipeline uses src/lib/text-chunker.ts. Keep heading,
+// frontmatter, fenced-block, table, overlap, and Unicode behavior aligned when
+// changing either implementation.
 fn chunk_markdown(content: &str, target_chars: usize, overlap_chars: usize) -> Vec<MarkdownChunk> {
     let normalized = content.replace("\r\n", "\n");
     let body = strip_frontmatter(&normalized);
@@ -876,24 +857,36 @@ mod tests {
     }
 
     #[test]
-    fn saving_revision_prunes_deleted_pages() {
+    fn revision_metadata_is_per_page_and_invalidates_without_rewriting_other_pages() {
         let root = project();
-        fs::write(root.join("wiki/current.md"), "# Current").unwrap();
-        fs::create_dir_all(root.join(".llm-wiki")).unwrap();
-        fs::write(
-            revision_path(root.to_str().unwrap()),
-            r#"{"wiki/deleted.md":"old"}"#,
-        )
-        .unwrap();
+        save_revision(root.to_str().unwrap(), "current", "sha256:current").unwrap();
+        save_revision(root.to_str().unwrap(), "other", "sha256:other").unwrap();
 
-        save_revision(root.to_str().unwrap(), "wiki/current.md", "sha256:current").unwrap();
-        let revisions = load_revisions(root.to_str().unwrap());
-
-        assert_eq!(revisions.len(), 1);
         assert_eq!(
-            revisions.get("wiki/current.md").map(String::as_str),
+            load_revision(root.to_str().unwrap(), "current").as_deref(),
             Some("sha256:current")
         );
+        invalidate_page_revision(root.to_str().unwrap(), "current").unwrap();
+        assert_eq!(load_revision(root.to_str().unwrap(), "current"), None);
+        assert_eq!(
+            load_revision(root.to_str().unwrap(), "other").as_deref(),
+            Some("sha256:other")
+        );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inconsistent_provider_dimensions_are_rejected_before_storage() {
+        let chunk = MarkdownChunk {
+            text: "content".to_string(),
+            heading_path: String::new(),
+        };
+        let rows = vec![
+            chunk_row(0, &chunk, vec![1.0, 2.0]),
+            chunk_row(1, &chunk, vec![1.0]),
+        ];
+
+        let error = validate_embedding_rows(&rows).unwrap_err();
+        assert_eq!(error.kind, PageEmbeddingErrorKind::Provider);
     }
 }
