@@ -826,7 +826,13 @@ async function autoIngestImpl(
               )
             }
           }
-          await injectImagesIntoSourceSummary(pp, sourceIdentity, sourceSummarySlug, savedImages)
+          await injectImagesIntoSourceSummary(
+            pp,
+            sourceIdentity,
+            sourceSummarySlug,
+            savedImages,
+            getLanguagePromptName(getOutputLanguage(sourceContent)),
+          )
           // Re-embed the source-summary page so caption text lands
           // in the search index. Without this step, search by image
           // content stays empty for files ingested before captioning
@@ -1347,7 +1353,13 @@ async function autoIngestImpl(
   // want the safety-net section to slip image refs into the wiki
   // through the back door.
   if (mmCfg.enabled && savedImages.length > 0 && !signal?.aborted) {
-    await injectImagesIntoSourceSummary(pp, sourceIdentity, sourceSummarySlug, savedImages)
+    await injectImagesIntoSourceSummary(
+      pp,
+      sourceIdentity,
+      sourceSummarySlug,
+      savedImages,
+      getLanguagePromptName(getOutputLanguage(sourceContent)),
+    )
   }
 
   if (writtenPaths.length > 0) {
@@ -3105,6 +3117,7 @@ async function injectImagesIntoSourceSummary(
   sourceIdentity: string,
   sourceSummarySlug: string,
   savedImages: { relPath: string; page: number | null; sha256?: string }[],
+  outputLanguage?: string,
 ): Promise<void> {
   if (savedImages.length === 0) return
   const sourceSummaryPath = `wiki/sources/${sourceSummarySlug}.md`
@@ -3118,7 +3131,7 @@ async function injectImagesIntoSourceSummary(
     // indexes whatever's in the wiki page, so without this, search
     // by image content (e.g. "find the chart with revenue data")
     // never matches because alt text was empty.
-    const captionsBySha = await loadCaptionCache(pp)
+    const captionsBySha = await loadCaptionCache(pp, outputLanguage)
     const newSection = buildImageMarkdownSection(
       savedImages.map((img) => ({
         ...img,
