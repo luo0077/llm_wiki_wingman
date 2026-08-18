@@ -260,6 +260,8 @@ export interface CaptionPipelineOptions {
    * passes the user's chosen value.
    */
   concurrency?: number
+  /** Language requested for factual captions (for example, "German"). */
+  outputLanguage?: string
   /**
    * Progress hook fired after each image finishes (ok or failed),
    * with running counts. Used by ingest to update the activity
@@ -401,7 +403,11 @@ export async function captionMarkdownImages(
         bytes.mimeType,
         llmConfig,
         options?.signal,
-        { contextBefore: before, contextAfter: after },
+        {
+          contextBefore: before,
+          contextAfter: after,
+          outputLanguage: options?.outputLanguage,
+        },
       )
       cache[hash] = {
         caption,
