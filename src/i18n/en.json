@@ -45,6 +45,8 @@
     "knowledge": "Knowledge",
     "files": "Files",
     "rawSources": "Raw Sources",
+    "filterBySource": "Filter knowledge by source",
+    "allSources": "All sources",
     "noWikiPages": "No wiki pages yet. Import sources to get started.",
     "typeLabels": {
       "overview": "Overview", "entity": "Entities", "concept": "Concepts",

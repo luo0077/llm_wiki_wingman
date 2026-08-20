@@ -45,6 +45,8 @@
     "knowledge": "知识库",
     "files": "文件",
     "rawSources": "原始资料",
+    "filterBySource": "按原始资料筛选知识",
+    "allSources": "全部资料",
     "noWikiPages": "暂无 Wiki 页面，请先导入原始资料。",
     "typeLabels": {
       "overview": "概览", "entity": "实体", "concept": "概念",

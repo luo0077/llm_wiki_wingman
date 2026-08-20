@@ -45,6 +45,8 @@
     "knowledge": "Conoscenza",
     "files": "File",
     "rawSources": "Fonti grezze",
+    "filterBySource": "Filtra la conoscenza per fonte",
+    "allSources": "Tutte le fonti",
     "noWikiPages": "Ancora nessuna pagina wiki. Importa delle fonti per iniziare.",
     "typeLabels": {
       "overview": "Panoramica", "entity": "Entità", "concept": "Concetti",
