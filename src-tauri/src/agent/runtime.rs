@@ -4137,7 +4137,7 @@ mod tests {
             None,
             None,
         );
-        let response = runtime
+        let error = runtime
             .run_once(AgentChatRequest {
                 message: "你现在有哪些 skill 可以使用？".to_string(),
                 session_id: Some("s1".to_string()),
@@ -4155,18 +4155,9 @@ mod tests {
                 ..Default::default()
             })
             .await
-            .unwrap();
+            .unwrap_err();
 
-        assert!(response.ok);
-        assert!(response.references.is_empty());
-        assert!(response
-            .tool_events
-            .iter()
-            .any(|event| event.tool == "skills.load"));
-        assert!(!response
-            .tool_events
-            .iter()
-            .any(|event| event.tool == "wiki.search"));
+        assert!(error.contains("Chat model is unavailable"));
     }
 
     #[tokio::test]
@@ -4254,7 +4245,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_once_can_disable_wiki_tool() {
+    async fn run_once_requires_a_generator_when_all_retrieval_tools_are_disabled() {
         let project = temp_project("disabled");
         let runtime = AgentRuntime::new(
             "project-1",
@@ -4264,7 +4255,7 @@ mod tests {
             None,
             None,
         );
-        let response = runtime
+        let error = runtime
             .run_once(AgentChatRequest {
                 message: "anything".to_string(),
                 session_id: None,
@@ -4281,15 +4272,13 @@ mod tests {
                 ..Default::default()
             })
             .await
-            .unwrap();
+            .unwrap_err();
 
-        assert!(response.references.is_empty());
-        assert!(response.tool_events.is_empty());
-        assert!(response.message.contains("No Agent tools were enabled"));
+        assert!(error.contains("Chat model is unavailable"));
     }
 
     #[tokio::test]
-    async fn run_once_in_fast_mode_exposes_tools_without_presearching() {
+    async fn run_once_in_fast_mode_does_not_presearch_without_generator() {
         let project = temp_project("fast");
         fs::write(
             project.join("overview.md"),
@@ -4310,7 +4299,7 @@ mod tests {
             None,
             None,
         );
-        let response = runtime
+        let error = runtime
             .run_once(AgentChatRequest {
                 message: "routing details?".to_string(),
                 session_id: None,
@@ -4327,19 +4316,22 @@ mod tests {
                 ..Default::default()
             })
             .await
-            .unwrap();
+            .unwrap_err();
 
-        assert!(response.references.is_empty());
-        assert!(response
-            .tool_events
-            .iter()
-            .any(|event| event.tool == "web.search" && event.status == "available"));
-        assert!(response.message.contains("Router intent"));
+        assert!(error.contains("Chat model is unavailable"));
     }
 
     #[tokio::test]
     async fn optional_tool_failure_does_not_abort_turn() {
         let project = temp_project("web-fail");
+        fs::write(
+            project
+                .join("wiki")
+                .join("concepts")
+                .join("external-update.md"),
+            "# External Update\n\nLocally indexed evidence for the latest external update.",
+        )
+        .unwrap();
         let runtime = AgentRuntime::new(
             "project-1",
             project.to_string_lossy(),
@@ -4354,7 +4346,7 @@ mod tests {
                 session_id: None,
                 mode: AgentMode::Standard,
                 tools: AgentToolOptions {
-                    wiki: false,
+                    wiki: true,
                     web: true,
                     anytxt: false,
                 },
@@ -4468,27 +4460,37 @@ mod tests {
             None,
             None,
         );
-        let response = runtime
-            .run_once(AgentChatRequest {
-                message: "hello".to_string(),
-                session_id: None,
-                mode: AgentMode::LocalFirst,
-                tools: AgentToolOptions {
-                    wiki: false,
-                    web: false,
-                    anytxt: false,
+        let captured_events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink_events = Arc::clone(&captured_events);
+        let error = runtime
+            .run_once_with_cancel_and_events(
+                AgentChatRequest {
+                    message: "hello".to_string(),
+                    session_id: None,
+                    mode: AgentMode::LocalFirst,
+                    tools: AgentToolOptions {
+                        wiki: false,
+                        web: false,
+                        anytxt: false,
+                    },
+                    top_k: None,
+                    include_content: None,
+                    history: Vec::new(),
+                    skills: Vec::new(),
+                    ..Default::default()
                 },
-                top_k: None,
-                include_content: None,
-                history: Vec::new(),
-                skills: Vec::new(),
-                ..Default::default()
-            })
+                None,
+                Some(Arc::new(move |event| {
+                    sink_events.lock().unwrap().push(event);
+                })),
+            )
             .await
-            .unwrap();
+            .unwrap_err();
 
-        assert!(response
-            .events
+        assert!(error.contains("Chat model is unavailable"));
+        assert!(captured_events
+            .lock()
+            .unwrap()
             .iter()
             .any(|event| matches!(event, AgentEvent::TurnStart { mode } if mode == "local_first")));
     }
