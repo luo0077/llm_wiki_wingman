@@ -1258,7 +1258,15 @@ impl AgentRuntime {
                 }
             }
         } else {
-            retrieval_summary
+            if references.is_empty() {
+                return Err(
+                    "Backend Agent LLM is not configured or the selected Chat model is unavailable. Check Settings > Models and try again."
+                        .to_string(),
+                );
+            }
+            // Preserve the retrieval-only API behavior, but never expose
+            // router diagnostics as assistant prose when no generator exists.
+            build_retrieval_answer(message, &references)
         };
         emit_event(
             &mut events,
@@ -4069,6 +4077,37 @@ mod tests {
         );
         assert!(response.message.contains("Agent Runtime"));
         assert_eq!(response.tool_events[0].tool, "wiki.search");
+    }
+
+    #[tokio::test]
+    async fn unconfigured_generator_never_returns_router_diagnostics_as_an_answer() {
+        let project = temp_project("no-generator-diagnostic");
+        let runtime = AgentRuntime::new(
+            "project-1",
+            project.to_string_lossy(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let error = runtime
+            .run_once(AgentChatRequest {
+                message: "How should I learn efficiently?".to_string(),
+                session_id: Some("s1".to_string()),
+                mode: AgentMode::Standard,
+                tools: AgentToolOptions {
+                    wiki: true,
+                    web: false,
+                    anytxt: false,
+                },
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("Chat model is unavailable"));
+        assert!(!error.contains("Router intent="));
     }
 
     #[tokio::test]
