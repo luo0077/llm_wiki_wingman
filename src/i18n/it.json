@@ -448,7 +448,8 @@
     "dismissSelected": "Scarta i selezionati",
     "affectedPages": "Pagine",
     "allClear": "Tutto a posto — niente da revisionare",
-    "resolvedDivider": "— Risolti —"
+    "resolvedDivider": "— Risolti —",
+    "actionFailed": "L'azione non è riuscita e resta in sospeso. Puoi riprovare: {{error}}"
   },
   "settings": {
     "title": "Impostazioni",

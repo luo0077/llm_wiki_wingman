@@ -448,7 +448,8 @@
     "dismissSelected": "Dismiss selected",
     "affectedPages": "Pages",
     "allClear": "All clear — nothing to review",
-    "resolvedDivider": "— Resolved —"
+    "resolvedDivider": "— Resolved —",
+    "actionFailed": "The action failed and remains pending. You can retry: {{error}}"
   },
   "settings": {
     "title": "Settings",

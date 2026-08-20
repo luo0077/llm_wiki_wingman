@@ -448,7 +448,8 @@
     "dismissSelected": "Отклонить выбранные",
     "affectedPages": "Страницы",
     "allClear": "Всё в порядке — нечего ревьюировать",
-    "resolvedDivider": "— Решённые —"
+    "resolvedDivider": "— Решённые —",
+    "actionFailed": "Действие не выполнено, элемент остаётся в ожидании. Можно повторить: {{error}}"
   },
   "settings": {
     "title": "Настройки",
