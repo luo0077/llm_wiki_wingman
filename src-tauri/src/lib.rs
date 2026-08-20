@@ -66,6 +66,7 @@ async fn agent_start_turn(
     app: tauri::AppHandle,
     project_id: String,
     mut request: agent::AgentChatRequest,
+    llm_config: Option<agent::provider::LlmConfig>,
 ) -> Result<agent::types::AgentChatResponse, String> {
     let project = resolve_agent_project(&app, &project_id)?;
     if request
@@ -101,7 +102,8 @@ async fn agent_start_turn(
                 .collect();
         }
     }
-    let runtime_config = load_agent_runtime_config(&app);
+    let mut runtime_config = load_agent_runtime_config(&app);
+    runtime_config.llm = llm_config.or(runtime_config.llm);
     let runtime = agent::AgentRuntime::new(
         project.id.clone(),
         project.path.clone(),
@@ -152,6 +154,7 @@ async fn agent_start_turn_stream(
     app: tauri::AppHandle,
     project_id: String,
     mut request: agent::AgentChatRequest,
+    llm_config: Option<agent::provider::LlmConfig>,
 ) -> Result<String, String> {
     let project = resolve_agent_project(&app, &project_id)?;
     if request
@@ -185,7 +188,8 @@ async fn agent_start_turn_stream(
             })
             .collect();
     }
-    let runtime_config = load_agent_runtime_config(&app);
+    let mut runtime_config = load_agent_runtime_config(&app);
+    runtime_config.llm = llm_config.or(runtime_config.llm);
     let runtime = agent::AgentRuntime::new(
         project.id.clone(),
         project.path.clone(),
