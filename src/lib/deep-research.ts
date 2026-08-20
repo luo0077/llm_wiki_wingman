@@ -10,6 +10,7 @@ import { buildLanguageDirective } from "@/lib/output-language"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { useReviewStore } from "@/stores/review-store"
+import { stripBodyWikilinkPathPrefixes } from "./page-merge"
 
 const MAX_RESEARCH_SOURCES = 20
 const MIN_RESEARCH_CONTENT_CHARS = 120
@@ -20,6 +21,32 @@ export interface ResearchSynthesisValidation {
   cleaned: string
   citedSourceIndexes: number[]
   error: string | null
+}
+
+export function buildResearchPageContent(
+  topic: string,
+  date: string,
+  synthesis: string,
+  references: string,
+): string {
+  return stripBodyWikilinkPathPrefixes([
+    "---",
+    "type: query",
+    `title: "Research: ${topic.replace(/"/g, '\\"')}"`,
+    `created: ${date}`,
+    "origin: deep-research",
+    "tags: [research]",
+    "---",
+    "",
+    `# Research: ${topic}`,
+    "",
+    synthesis,
+    "",
+    "## References",
+    "",
+    references,
+    "",
+  ].join("\n"))
 }
 
 interface ResearchSourceDeps {
@@ -423,24 +450,12 @@ async function executeResearch(
       })
       .join("\n")
 
-    const pageContent = [
-      "---",
-      `type: query`,
-      `title: "Research: ${topic.replace(/"/g, '\\"')}"`,
-      `created: ${date}`,
-      `origin: deep-research`,
-      `tags: [research]`,
-      "---",
-      "",
-      `# Research: ${topic}`,
-      "",
+    const pageContent = buildResearchPageContent(
+      topic,
+      date,
       validation.cleaned,
-      "",
-      "## References",
-      "",
       references,
-      "",
-    ].join("\n")
+    )
 
     await writeFile(filePath, pageContent)
     const savedPath = `wiki/queries/${fileName}`

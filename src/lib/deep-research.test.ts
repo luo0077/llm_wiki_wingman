@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   citedResearchSourceIndexes,
+  buildResearchPageContent,
   collectResearchSources,
   makeDeepResearchFileName,
   noResearchSourcesTaskPatch,
@@ -55,6 +56,25 @@ describe("makeDeepResearchFileName", () => {
     const localMorning = new Date(2026, 5, 6, 1, 30, 0)
 
     expect(makeDeepResearchFileName("政策版本差异", localMorning).date).toBe("2026-06-06")
+  })
+})
+
+describe("buildResearchPageContent", () => {
+  it("normalizes path-prefixed page links without changing code or embeds", () => {
+    const content = buildResearchPageContent(
+      "AI research",
+      "2026-08-20",
+      [
+        "See [[concepts/adaptation|adaptation]] and [[entities/person#work]].",
+        "Keep `[[concepts/code-example]]` and ![[media/chart.png]].",
+      ].join("\n"),
+      "1. [Source](https://example.com)",
+    )
+
+    expect(content).toContain("[[adaptation|adaptation]]")
+    expect(content).toContain("[[person#work]]")
+    expect(content).toContain("`[[concepts/code-example]]`")
+    expect(content).toContain("![[media/chart.png]]")
   })
 })
 
