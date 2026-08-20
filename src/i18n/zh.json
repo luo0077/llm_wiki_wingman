@@ -109,6 +109,7 @@
     "thinking": "思考中",
     "open": "打开",
     "retry": "重试",
+    "rerun": "重新执行",
     "remove": "移除",
     "status": {
       "queued": "排队中",

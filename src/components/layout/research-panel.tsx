@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { useResearchStore, type ResearchTask } from "@/stores/research-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { readFile } from "@/commands/fs"
-import { queueResearch } from "@/lib/deep-research"
+import { queueResearch, queueResearchBatch } from "@/lib/deep-research"
 import { normalizePath } from "@/lib/path-utils"
 import { hasConfiguredDeepResearchSources } from "@/lib/web-search"
 import { isImeComposing } from "@/lib/keyboard-utils"
@@ -21,6 +21,13 @@ import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
+
+function hasActiveRerun(tasks: ResearchTask[], taskId: string): boolean {
+  return tasks.some((task) =>
+    task.rerunOfTaskId === taskId &&
+    ["queued", "searching", "synthesizing", "saving"].includes(task.status),
+  )
+}
 
 export function ResearchPanel() {
   const { t } = useTranslation()
@@ -54,15 +61,17 @@ export function ResearchPanel() {
       await appDialog.alert({ message: t("research.notConfigured") })
       return
     }
-    queueResearch(
+    queueResearchBatch(
       normalizePath(project.path),
-      task.topic,
+      [{
+        topic: task.topic,
+        searchQueries: task.searchQueries,
+        sourceReviewId: task.sourceReviewId,
+        rerunOfTaskId: task.id,
+      }],
       llmConfig,
       searchApiConfig,
-      task.searchQueries,
-      task.sourceReviewId,
     )
-    removeTask(task.id)
   }
 
   return (
@@ -118,13 +127,14 @@ export function ResearchPanel() {
                 task={task}
                 onRemove={removeTask}
                 onRetry={handleRetryResearch}
+                rerunPending={hasActiveRerun(tasks, task.id)}
               />
             ))}
             {queued.map((task) => (
-              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} />
+              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} rerunPending={hasActiveRerun(tasks, task.id)} />
             ))}
             {done.map((task) => (
-              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} />
+              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} rerunPending={hasActiveRerun(tasks, task.id)} />
             ))}
           </div>
         )}
@@ -246,10 +256,12 @@ function ResearchTaskCard({
   task,
   onRemove,
   onRetry,
+  rerunPending,
 }: {
   task: ResearchTask
   onRemove: (id: string) => void
   onRetry: (task: ResearchTask) => void
+  rerunPending: boolean
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(
@@ -353,15 +365,16 @@ function ResearchTaskCard({
                 {t("research.open")}
               </Button>
             )}
-            {task.status === "error" && (
+            {(task.status === "done" || task.status === "error") && (
               <Button
                 variant="outline"
                 size="sm"
                 className="h-6 text-[11px] gap-1"
                 onClick={() => onRetry(task)}
+                disabled={rerunPending}
               >
                 <RotateCcw className="h-3 w-3" />
-                {t("research.retry")}
+                {t(task.status === "error" ? "research.retry" : "research.rerun")}
               </Button>
             )}
             {(task.status === "done" || task.status === "error") && (

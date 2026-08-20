@@ -202,6 +202,7 @@ export interface ResearchBatchInput {
   topic: string
   searchQueries?: string[]
   sourceReviewId?: string
+  rerunOfTaskId?: string
 }
 
 export function queueResearchBatch(

@@ -109,6 +109,7 @@
     "thinking": "Ragionamento",
     "open": "Apri",
     "retry": "Riprova",
+    "rerun": "Esegui di nuovo",
     "remove": "Rimuovi",
     "status": {
       "queued": "In coda",

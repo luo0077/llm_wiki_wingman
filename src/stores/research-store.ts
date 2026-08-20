@@ -7,6 +7,7 @@ export interface ResearchTask {
   /** Review item that requested this research. It is resolved only after the
    * generated page has been written successfully. */
   sourceReviewId?: string
+  rerunOfTaskId?: string
   searchQueries?: string[]
   status: "queued" | "searching" | "synthesizing" | "saving" | "done" | "error"
   webResults: WebSearchResult[]
@@ -22,7 +23,7 @@ interface ResearchState {
   maxConcurrent: number
 
   addTask: (topic: string) => string
-  addTasks: (inputs: Array<Pick<ResearchTask, "topic" | "searchQueries" | "sourceReviewId">>) => string[]
+  addTasks: (inputs: Array<Pick<ResearchTask, "topic" | "searchQueries" | "sourceReviewId" | "rerunOfTaskId">>) => string[]
   updateTask: (id: string, updates: Partial<ResearchTask>) => void
   removeTask: (id: string) => void
   setPanelOpen: (open: boolean) => void
@@ -33,13 +34,14 @@ interface ResearchState {
 let counter = 0
 
 function createResearchTask(
-  input: Pick<ResearchTask, "topic" | "searchQueries" | "sourceReviewId">,
+  input: Pick<ResearchTask, "topic" | "searchQueries" | "sourceReviewId" | "rerunOfTaskId">,
 ): ResearchTask {
   return {
     id: `research-${++counter}`,
     topic: input.topic,
     ...(input.searchQueries?.length ? { searchQueries: input.searchQueries } : {}),
     ...(input.sourceReviewId ? { sourceReviewId: input.sourceReviewId } : {}),
+    ...(input.rerunOfTaskId ? { rerunOfTaskId: input.rerunOfTaskId } : {}),
     status: "queued",
     webResults: [],
     synthesis: "",

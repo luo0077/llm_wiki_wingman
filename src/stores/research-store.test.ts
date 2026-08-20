@@ -14,6 +14,7 @@ describe("research store batch queue", () => {
       topic: `Topic ${index}`,
       searchQueries: [`query ${index}`],
       sourceReviewId: `review-${index}`,
+      rerunOfTaskId: index === 99 ? "research-original" : undefined,
     })))
     unsubscribe()
 
@@ -23,6 +24,7 @@ describe("research store batch queue", () => {
       topic: "Topic 99",
       searchQueries: ["query 99"],
       sourceReviewId: "review-99",
+      rerunOfTaskId: "research-original",
       status: "queued",
     })
     expect(useResearchStore.getState().panelOpen).toBe(true)
