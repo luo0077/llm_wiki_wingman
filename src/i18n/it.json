@@ -444,6 +444,7 @@
     "selectPending": "Seleziona quelli in sospeso",
     "selectItem": "Seleziona {{title}}",
     "selectedCount": "{{count}} selezionati",
+    "researchSelected": "Ricerca selezionati ({{count}})",
     "markSelectedResolved": "Segna i selezionati come risolti",
     "dismissSelected": "Scarta i selezionati",
     "affectedPages": "Pagine",

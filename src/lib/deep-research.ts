@@ -198,6 +198,28 @@ export function queueResearch(
   return taskId
 }
 
+export interface ResearchBatchInput {
+  topic: string
+  searchQueries?: string[]
+  sourceReviewId?: string
+}
+
+export function queueResearchBatch(
+  projectPath: string,
+  inputs: ResearchBatchInput[],
+  llmConfig: LlmConfig,
+  searchConfig: SearchApiConfig,
+): string[] {
+  const normalized = inputs
+    .map((input) => ({ ...input, topic: input.topic.trim() }))
+    .filter((input) => input.topic.length > 0)
+  if (normalized.length === 0) return []
+
+  const ids = useResearchStore.getState().addTasks(normalized)
+  setTimeout(() => processQueue(projectPath, llmConfig, searchConfig), 50)
+  return ids
+}
+
 export function resolveReviewForSavedResearch(
   projectPath: string,
   taskId: string,

@@ -444,6 +444,7 @@
     "selectPending": "Select pending",
     "selectItem": "Select {{title}}",
     "selectedCount": "{{count}} selected",
+    "researchSelected": "Research selected ({{count}})",
     "markSelectedResolved": "Mark selected resolved",
     "dismissSelected": "Dismiss selected",
     "affectedPages": "Pages",

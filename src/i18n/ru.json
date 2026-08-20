@@ -444,6 +444,7 @@
     "selectPending": "Выбрать ожидающие",
     "selectItem": "Выбрать {{title}}",
     "selectedCount": "Выбрано: {{count}}",
+    "researchSelected": "Исследовать выбранные ({{count}})",
     "markSelectedResolved": "Отметить выбранные как решённые",
     "dismissSelected": "Отклонить выбранные",
     "affectedPages": "Страницы",

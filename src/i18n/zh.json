@@ -444,6 +444,7 @@
     "selectPending": "选择待处理项",
     "selectItem": "选择 {{title}}",
     "selectedCount": "已选择 {{count}} 项",
+    "researchSelected": "研究选中项（{{count}}）",
     "markSelectedResolved": "标记为已解决",
     "dismissSelected": "忽略选中项",
     "affectedPages": "相关页面",

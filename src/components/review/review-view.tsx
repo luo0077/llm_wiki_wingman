@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react"
-import { queueResearch } from "@/lib/deep-research"
+import { queueResearch, queueResearchBatch } from "@/lib/deep-research"
 import {
   AlertTriangle,
   Copy,
@@ -25,6 +25,7 @@ import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
 import { useResearchStore } from "@/stores/research-store"
+import { reviewResearchTopic, selectedResearchReviews } from "@/lib/review-batch-research"
 
 const typeConfig: Record<ReviewItem["type"], { icon: typeof AlertTriangle; color: string }> = {
   contradiction: { icon: AlertTriangle, color: "text-amber-500" },
@@ -47,6 +48,7 @@ export function ReviewView() {
   const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(() => new Set())
   const [workingReviewIds, setWorkingReviewIds] = useState<Set<string>>(() => new Set())
   const [reviewErrors, setReviewErrors] = useState<Record<string, string>>({})
+  const researchTasks = useResearchStore((s) => s.tasks)
 
   const setReviewWorking = useCallback((id: string, working: boolean) => {
     setWorkingReviewIds((current) => {
@@ -339,6 +341,32 @@ export function ReviewView() {
     setSelectedReviewIds(new Set())
   }, [dismissItem, selectedPendingIds])
 
+  const batchResearchItems = useMemo(
+    () => selectedResearchReviews(items, selectedReviewIds, researchTasks),
+    [items, researchTasks, selectedReviewIds],
+  )
+
+  const handleBatchResearch = useCallback(async () => {
+    if (!project || batchResearchItems.length === 0) return
+    const state = useWikiStore.getState()
+    if (!hasConfiguredDeepResearchSources(state.searchApiConfig)) {
+      await appDialog.alert({ message: t("research.notConfigured") })
+      return
+    }
+    queueResearchBatch(
+      normalizePath(project.path),
+      batchResearchItems.map((item) => ({
+        topic: reviewResearchTopic(item),
+        searchQueries: item.searchQueries,
+        sourceReviewId: item.id,
+      })),
+      state.llmConfig,
+      state.searchApiConfig,
+    )
+    const queuedIds = new Set(batchResearchItems.map((item) => item.id))
+    setSelectedReviewIds((current) => new Set([...current].filter((id) => !queuedIds.has(id))))
+  }, [appDialog, batchResearchItems, project, t])
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -385,6 +413,15 @@ export function ReviewView() {
           <span className="text-muted-foreground">
             {t("review.selectedCount", { count: selectedPendingIds.length })}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={batchResearchItems.length === 0}
+            onClick={handleBatchResearch}
+          >
+            {t("review.researchSelected", { count: batchResearchItems.length })}
+          </Button>
           <Button
             variant="outline"
             size="sm"

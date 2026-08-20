@@ -22,6 +22,7 @@ interface ResearchState {
   maxConcurrent: number
 
   addTask: (topic: string) => string
+  addTasks: (inputs: Array<Pick<ResearchTask, "topic" | "searchQueries" | "sourceReviewId">>) => string[]
   updateTask: (id: string, updates: Partial<ResearchTask>) => void
   removeTask: (id: string) => void
   setPanelOpen: (open: boolean) => void
@@ -31,30 +32,42 @@ interface ResearchState {
 
 let counter = 0
 
+function createResearchTask(
+  input: Pick<ResearchTask, "topic" | "searchQueries" | "sourceReviewId">,
+): ResearchTask {
+  return {
+    id: `research-${++counter}`,
+    topic: input.topic,
+    ...(input.searchQueries?.length ? { searchQueries: input.searchQueries } : {}),
+    ...(input.sourceReviewId ? { sourceReviewId: input.sourceReviewId } : {}),
+    status: "queued",
+    webResults: [],
+    synthesis: "",
+    savedPath: null,
+    error: null,
+    createdAt: Date.now(),
+  }
+}
+
 export const useResearchStore = create<ResearchState>((set, get) => ({
   tasks: [],
   panelOpen: false,
   maxConcurrent: 3,
 
   addTask: (topic) => {
-    const id = `research-${++counter}`
+    const task = createResearchTask({ topic })
     set((state) => ({
-      tasks: [
-        ...state.tasks,
-        {
-          id,
-          topic,
-          status: "queued",
-          webResults: [],
-          synthesis: "",
-          savedPath: null,
-          error: null,
-          createdAt: Date.now(),
-        },
-      ],
+      tasks: [...state.tasks, task],
       panelOpen: true,
     }))
-    return id
+    return task.id
+  },
+
+  addTasks: (inputs) => {
+    const tasks = inputs.map(createResearchTask)
+    if (tasks.length === 0) return []
+    set((state) => ({ tasks: [...state.tasks, ...tasks], panelOpen: true }))
+    return tasks.map((task) => task.id)
   },
 
   updateTask: (id, updates) =>
