@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   citedResearchSourceIndexes,
+  addResearchTaskDiscriminator,
   buildResearchPageContent,
   collectResearchSources,
   makeDeepResearchFileName,
+  makeAvailableResearchFilePath,
   noResearchSourcesTaskPatch,
+  researchPageIdFromPath,
   resolveReviewForSavedResearch,
   validateResearchSynthesis,
 } from "./deep-research"
@@ -75,6 +78,48 @@ describe("buildResearchPageContent", () => {
     expect(content).toContain("[[person#work]]")
     expect(content).toContain("`[[concepts/code-example]]`")
     expect(content).toContain("![[media/chart.png]]")
+  })
+
+  it("keeps multiline topics inside one safe YAML scalar and heading", () => {
+    const content = buildResearchPageContent(
+      "first line\nsecond: \"quoted\"",
+      "2026-08-20",
+      "Substantive synthesis [1].",
+      "1. [Source](https://example.com)",
+    )
+    expect(content).toContain('title: "Research: first line second: \\"quoted\\""')
+    expect(content).toContain("# Research: first line second: \"quoted\"")
+    expect(content).not.toContain("first line\nsecond")
+  })
+})
+
+describe("makeAvailableResearchFilePath", () => {
+  it("adds a suffix instead of overwriting a same-second research result", async () => {
+    const existing = new Set([
+      "/project/wiki/queries/research-topic-2026-08-20-120000.md",
+      "/project/wiki/queries/research-topic-2026-08-20-120000-2.md",
+    ])
+    await expect(makeAvailableResearchFilePath(
+      "/project/wiki/queries",
+      "research-topic-2026-08-20-120000.md",
+      async (path) => existing.has(path),
+    )).resolves.toBe("/project/wiki/queries/research-topic-2026-08-20-120000-3.md")
+  })
+
+  it("gives concurrent tasks distinct readable filenames before existence checks", () => {
+    const fileName = "research-topic-2026-08-20-120000.md"
+    expect(addResearchTaskDiscriminator(fileName, "research-41"))
+      .toBe("research-topic-2026-08-20-120000-research-41.md")
+    expect(addResearchTaskDiscriminator(fileName, "research-42"))
+      .not.toBe(addResearchTaskDiscriminator(fileName, "research-41"))
+  })
+
+  it("derives the vector page id from the final collision-safe path", () => {
+    expect(researchPageIdFromPath(
+      "/project/wiki/queries/research-topic-2026-08-20-120000-research-41-2.md",
+    )).toBe("research-topic-2026-08-20-120000-research-41-2")
+    expect(researchPageIdFromPath("C:\\project\\wiki\\queries\\research-topic-3.MD"))
+      .toBe("research-topic-3")
   })
 })
 

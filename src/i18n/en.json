@@ -192,6 +192,8 @@
     "importSkip": {
       "failed": "Import failed: {{error}}",
       "summary": "Imported {{imported}}, skipped {{skipped}}",
+      "showRemaining": "Show {{count}} more skipped files",
+      "showLess": "Show fewer skipped files",
       "reason": {
         "unsupported-type": "Unsupported file type",
         "excluded": "Blocked by an exclusion rule",

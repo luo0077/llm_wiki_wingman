@@ -8,7 +8,7 @@ export function normalizeSourceIdentity(source: string): string {
   return normalizePath(source)
     .replace(/^\.\//, "")
     .replace(/^raw\/sources\//i, "")
-    .toLocaleLowerCase()
+    .toLowerCase()
 }
 
 export function listPageSourceIdentities<T extends SourceLinkedPage>(pages: readonly T[]): string[] {

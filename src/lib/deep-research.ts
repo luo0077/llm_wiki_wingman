@@ -2,7 +2,7 @@ import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "./anytxt-search"
 import { hasConfiguredSearchProvider, resolveSearchConfig, webSearch } from "./web-search"
 import { streamChat } from "./llm-client"
 import { currentWikiDate } from "./ingest"
-import { writeFile, readFile } from "@/commands/fs"
+import { fileExists, writeFile, readFile } from "@/commands/fs"
 import { useWikiStore, type LlmConfig, type SearchApiConfig } from "@/stores/wiki-store"
 import { useResearchStore } from "@/stores/research-store"
 import { normalizePath } from "@/lib/path-utils"
@@ -29,16 +29,17 @@ export function buildResearchPageContent(
   synthesis: string,
   references: string,
 ): string {
+  const displayTopic = topic.replace(/\s+/g, " ").trim()
   return stripBodyWikilinkPathPrefixes([
     "---",
     "type: query",
-    `title: "Research: ${topic.replace(/"/g, '\\"')}"`,
+    `title: ${JSON.stringify(`Research: ${displayTopic}`)}`,
     `created: ${date}`,
     "origin: deep-research",
     "tags: [research]",
     "---",
     "",
-    `# Research: ${topic}`,
+    `# Research: ${displayTopic}`,
     "",
     synthesis,
     "",
@@ -47,6 +48,35 @@ export function buildResearchPageContent(
     references,
     "",
   ].join("\n"))
+}
+
+export async function makeAvailableResearchFilePath(
+  directory: string,
+  fileName: string,
+  exists: (path: string) => Promise<boolean> = fileExists,
+): Promise<string> {
+  const basePath = `${directory}/${fileName}`
+  if (!(await exists(basePath))) return basePath
+
+  const extensionIndex = fileName.toLowerCase().endsWith(".md") ? fileName.length - 3 : fileName.length
+  const stem = fileName.slice(0, extensionIndex)
+  const extension = fileName.slice(extensionIndex)
+  for (let suffix = 2; suffix <= 999; suffix++) {
+    const candidate = `${directory}/${stem}-${suffix}${extension}`
+    if (!(await exists(candidate))) return candidate
+  }
+  return `${directory}/${stem}-${Date.now()}${extension}`
+}
+
+export function addResearchTaskDiscriminator(fileName: string, taskId: string): string {
+  const safeTaskId = taskId.replace(/[^A-Za-z0-9-]/g, "-").replace(/-+/g, "-")
+  const extensionIndex = fileName.toLowerCase().endsWith(".md") ? fileName.length - 3 : fileName.length
+  return `${fileName.slice(0, extensionIndex)}-${safeTaskId || "task"}${fileName.slice(extensionIndex)}`
+}
+
+export function researchPageIdFromPath(filePath: string): string {
+  const fileName = filePath.split(/[\\/]/).pop() || filePath
+  return fileName.replace(/\.md$/i, "")
 }
 
 interface ResearchSourceDeps {
@@ -461,7 +491,8 @@ async function executeResearch(
     if (!updateTaskIfActive(pp, taskId, { status: "saving", synthesis: validation.cleaned })) return
 
     const { fileName, date } = makeDeepResearchFileName(topic)
-    const filePath = `${pp}/wiki/queries/${fileName}`
+    const taskFileName = addResearchTaskDiscriminator(fileName, taskId)
+    const filePath = await makeAvailableResearchFilePath(`${pp}/wiki/queries`, taskFileName)
 
     // Persist only sources cited by the synthesis. Search providers can return
     // broad candidates; listing every candidate makes unused, off-topic hits
@@ -481,7 +512,7 @@ async function executeResearch(
     )
 
     await writeFile(filePath, pageContent)
-    const savedPath = `wiki/queries/${fileName}`
+    const savedPath = filePath.slice(`${pp}/`.length)
 
     if (!updateTaskIfActive(pp, taskId, {
       status: "done",
@@ -502,7 +533,7 @@ async function executeResearch(
     if (embeddingConfig.enabled && embeddingConfig.model) {
       try {
         const { embedPage } = await import("@/lib/embedding")
-        await embedPage(pp, fileName.replace(/\.md$/i, ""), `Research: ${topic}`, pageContent, embeddingConfig)
+        await embedPage(pp, researchPageIdFromPath(filePath), `Research: ${topic}`, pageContent, embeddingConfig)
       } catch (err) {
         console.warn("[DeepResearch] failed to index generated query page:", err)
       }

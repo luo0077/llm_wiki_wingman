@@ -9,7 +9,7 @@ import {
   FileSearch, FileText, Globe2, Send, RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useResearchStore, type ResearchTask } from "@/stores/research-store"
+import { hasActiveResearchRerun, useResearchStore, type ResearchTask } from "@/stores/research-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { readFile } from "@/commands/fs"
 import { queueResearch, queueResearchBatch } from "@/lib/deep-research"
@@ -21,13 +21,6 @@ import { getHtmlLang, getTextDirection } from "@/lib/language-metadata"
 import { MermaidDiagram, unwrapMermaidPre } from "@/components/mermaid-diagram"
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
-
-function hasActiveRerun(tasks: ResearchTask[], taskId: string): boolean {
-  return tasks.some((task) =>
-    task.rerunOfTaskId === taskId &&
-    ["queued", "searching", "synthesizing", "saving"].includes(task.status),
-  )
-}
 
 export function ResearchPanel() {
   const { t } = useTranslation()
@@ -57,6 +50,7 @@ export function ResearchPanel() {
 
   async function handleRetryResearch(task: ResearchTask) {
     if (!project) return
+    if (hasActiveResearchRerun(useResearchStore.getState().tasks, task.id)) return
     if (!hasConfiguredDeepResearchSources(searchApiConfig)) {
       await appDialog.alert({ message: t("research.notConfigured") })
       return
@@ -127,14 +121,14 @@ export function ResearchPanel() {
                 task={task}
                 onRemove={removeTask}
                 onRetry={handleRetryResearch}
-                rerunPending={hasActiveRerun(tasks, task.id)}
+                rerunPending={hasActiveResearchRerun(tasks, task.id)}
               />
             ))}
             {queued.map((task) => (
-              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} rerunPending={hasActiveRerun(tasks, task.id)} />
+              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} rerunPending={hasActiveResearchRerun(tasks, task.id)} />
             ))}
             {done.map((task) => (
-              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} rerunPending={hasActiveRerun(tasks, task.id)} />
+              <ResearchTaskCard key={task.id} task={task} onRemove={removeTask} onRetry={handleRetryResearch} rerunPending={hasActiveResearchRerun(tasks, task.id)} />
             ))}
           </div>
         )}

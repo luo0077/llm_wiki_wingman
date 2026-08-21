@@ -32,6 +32,7 @@ import { getQueue, type IngestTask } from "@/lib/ingest-queue"
 
 const SOURCE_TREE_INITIAL_ROWS = 160
 const SOURCE_TREE_LOAD_BATCH = 160
+const IMPORT_SKIP_INITIAL_ROWS = 100
 type SourceIngestStatus = "not-ingested" | "ingested" | IngestTask["status"]
 
 export function SourcesView() {
@@ -54,6 +55,7 @@ export function SourcesView() {
   const [urlError, setUrlError] = useState<string | null>(null)
   const [urlResults, setUrlResults] = useState<UrlImportResult[]>([])
   const [importOutcome, setImportOutcome] = useState<ImportOutcome | null>(null)
+  const [showAllImportSkips, setShowAllImportSkips] = useState(false)
   const [ingestedIdentities, setIngestedIdentities] = useState<string[]>([])
   const [queueSnapshot, setQueueSnapshot] = useState<IngestTask[]>(() => [...getQueue()])
   const [sourceQuery, setSourceQuery] = useState("")
@@ -206,6 +208,7 @@ export function SourcesView() {
 
     setImporting(true)
     setImportOutcome(null)
+    setShowAllImportSkips(false)
     const paths = Array.isArray(selected) ? selected : [selected]
     try {
       const result = await importSourceFiles(project, paths, llmConfig, sourceWatchConfig)
@@ -231,6 +234,7 @@ export function SourcesView() {
 
     setImporting(true)
     setImportOutcome(null)
+    setShowAllImportSkips(false)
     try {
       const result = await importSourceFolder(project, selected, llmConfig, sourceWatchConfig)
       setImportOutcome(summarizeImportOutcome(result, null))
@@ -509,16 +513,31 @@ export function SourcesView() {
                 <X className="h-3 w-3" />
               </button>
             </div>
-            {importOutcome.skipped.map((item, index) => (
-              <div key={`${item.name}-${index}`} className="pl-1">
-                {item.name}
-                {": "}
-                {t(`sources.importSkip.reason.${item.reason}`, {
-                  defaultValue: item.reason,
-                })}
-                {item.detail ? ` (${item.detail})` : ""}
-              </div>
-            ))}
+            {importOutcome.skipped
+              .slice(0, showAllImportSkips ? undefined : IMPORT_SKIP_INITIAL_ROWS)
+              .map((item, index) => (
+                <div key={`${item.name}-${index}`} className="pl-1">
+                  {item.name}
+                  {": "}
+                  {t(`sources.importSkip.reason.${item.reason}`, {
+                    defaultValue: item.reason,
+                  })}
+                  {item.detail ? ` (${item.detail})` : ""}
+                </div>
+              ))}
+            {importOutcome.skipped.length > IMPORT_SKIP_INITIAL_ROWS && (
+              <button
+                type="button"
+                className="pl-1 font-medium underline underline-offset-2"
+                onClick={() => setShowAllImportSkips((current) => !current)}
+              >
+                {showAllImportSkips
+                  ? t("sources.importSkip.showLess")
+                  : t("sources.importSkip.showRemaining", {
+                      count: importOutcome.skipped.length - IMPORT_SKIP_INITIAL_ROWS,
+                    })}
+              </button>
+            )}
           </div>
         )}
         {sources.length === 0 ? (

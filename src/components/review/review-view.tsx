@@ -347,7 +347,13 @@ export function ReviewView() {
   )
 
   const handleBatchResearch = useCallback(async () => {
-    if (!project || batchResearchItems.length === 0) return
+    if (!project) return
+    const eligibleItems = selectedResearchReviews(
+      items,
+      selectedReviewIds,
+      useResearchStore.getState().tasks,
+    )
+    if (eligibleItems.length === 0) return
     const state = useWikiStore.getState()
     if (!hasConfiguredDeepResearchSources(state.searchApiConfig)) {
       await appDialog.alert({ message: t("research.notConfigured") })
@@ -355,7 +361,7 @@ export function ReviewView() {
     }
     queueResearchBatch(
       normalizePath(project.path),
-      batchResearchItems.map((item) => ({
+      eligibleItems.map((item) => ({
         topic: reviewResearchTopic(item),
         searchQueries: item.searchQueries,
         sourceReviewId: item.id,
@@ -363,9 +369,9 @@ export function ReviewView() {
       state.llmConfig,
       state.searchApiConfig,
     )
-    const queuedIds = new Set(batchResearchItems.map((item) => item.id))
+    const queuedIds = new Set(eligibleItems.map((item) => item.id))
     setSelectedReviewIds((current) => new Set([...current].filter((id) => !queuedIds.has(id))))
-  }, [appDialog, batchResearchItems, project, t])
+  }, [appDialog, items, project, selectedReviewIds, t])
 
   return (
     <div className="flex h-full flex-col">

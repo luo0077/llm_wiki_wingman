@@ -192,6 +192,8 @@
     "importSkip": {
       "failed": "导入失败：{{error}}",
       "summary": "已导入 {{imported}} 个，跳过 {{skipped}} 个",
+      "showRemaining": "显示其余 {{count}} 个跳过的文件",
+      "showLess": "收起跳过的文件",
       "reason": {
         "unsupported-type": "不支持的文件类型",
         "excluded": "被排除规则阻止",

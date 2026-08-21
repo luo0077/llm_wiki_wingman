@@ -26,6 +26,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.6.10",
+    date: "2026-08-21",
+    highlights: {
+      en: [
+        "Added source-based knowledge filtering.",
+        "Added batch Deep Research for review items and support for rerunning completed or failed research tasks.",
+        "Added support for MinerU 3.0-3.2 backend names and made image captions follow the configured output language.",
+        "Added detailed reporting for files skipped during source import.",
+        "Improved large duplicate scans and fixed Deep Research concurrency, file naming, vector indexing, and wikilink consistency.",
+        "Improved Agent model routing and provider compatibility, and fixed language detection, retry behavior, and Windows CRLF data integrity issues.",
+      ],
+      zh: [
+        "新增按原始资料来源筛选知识内容。",
+        "Review 支持批量执行深度研究，并可重新运行已完成或失败的研究任务。",
+        "支持 MinerU 3.0-3.2 后端名称，图片描述会遵循配置的输出语言。",
+        "文件导入新增跳过文件及具体原因的详细报告。",
+        "优化大规模重复文件扫描，并修复深度研究并发、文件命名、向量索引和 Wiki 链接一致性问题。",
+        "完善 Agent 模型路由与 Provider 兼容性，并修复语言误判、重试行为和 Windows CRLF 数据完整性问题。",
+      ],
+    },
+  },
+  {
     version: "0.6.9",
     date: "2026-08-14",
     highlights: {
