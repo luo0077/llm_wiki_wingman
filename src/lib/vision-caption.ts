@@ -215,11 +215,8 @@ export async function captionImage(
     {
       temperature: options?.temperature ?? 0,
       max_tokens: options?.maxTokens ?? 4096,
-      // Captioning is a short factual vision task. If the main LLM is
-      // configured as a reasoning model, inheriting that setting here
-      // often burns the small caption budget on thinking and produces
-      // no usable alt text. Disable reasoning for caption calls unless
-      // this helper grows an explicit caption-reasoning option.
+      // Captioning is a short factual vision task, so reasoning defaults off.
+      // The ingest preference can enable it for models that require thinking.
       reasoning: resolveIngestReasoning(llmConfig),
     },
   )

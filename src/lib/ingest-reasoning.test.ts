@@ -33,10 +33,7 @@ describe("ingest reasoning is settable instead of hardcoded off", () => {
     expect(config.reasoning).toEqual({ mode: "high" })
   })
 
-  it("is not normalized here, so off cannot decay to auto on auto-only providers", () => {
-    // Normalizing in both places turned "off" into "auto" for providers whose
-    // capability list is auto-only, silently re-enabling the thinking that
-    // ingest disables on purpose. The provider layer normalizes; this does not.
+  it("leaves provider normalization to the wire builder", () => {
     const autoOnly: LlmConfig = {
       ...openAiConfig,
       provider: "custom",

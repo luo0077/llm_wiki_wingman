@@ -35,8 +35,6 @@ interface LlmConfig {
   maxContextSize: number // max context window in characters
   apiMode?: CustomApiMode
   reasoning?: ReasoningConfig
-  /** Reasoning for ingest's structured calls. See LlmConfig.ingestReasoning. */
-  ingestReasoning?: ReasoningConfig
   /**
    * Reasoning for ingest's structured calls (analysis, page generation,
    * captioning, dedup), kept separate from `reasoning` because the two want
@@ -345,6 +343,8 @@ export interface ProviderOverride {
   apiMode?: CustomApiMode
   maxContextSize?: number
   reasoning?: ReasoningConfig
+  /** Reasoning used by structured ingest calls; defaults to off. */
+  ingestReasoning?: ReasoningConfig
   localCliIsolation?: boolean
   codexCliTimeoutMinutes?: number
   requestTimeoutMinutes?: number

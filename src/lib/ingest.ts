@@ -317,6 +317,9 @@ function resolveCaptionConfig(
     azureApiVersion: mm.azureApiVersion,
     azureModelFamily: mm.azureModelFamily,
     apiMode: mm.apiMode,
+    // The dedicated caption provider has no separate reasoning control. Reuse
+    // the ingest preference and let its own provider capabilities normalize it.
+    ingestReasoning: mainLlm.ingestReasoning,
     // The caption helper hits `streamChat` directly, which doesn't
     // care about `maxContextSize` (that field is for the analysis
     // / generation prompt-truncation logic). Keep it set so the
