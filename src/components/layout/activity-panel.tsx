@@ -27,6 +27,7 @@ import {
   movePendingTask,
   pauseProcessing,
   resumeProcessing,
+  subscribeIngestQueue,
   type IngestTask,
 } from "@/lib/ingest-queue"
 import {
@@ -98,12 +99,10 @@ export function ActivityPanel() {
   const runningCount = items.filter((i) => i.status === "running").length
   const hasItems = items.length > 0
 
-  // Poll queue state
+  // Queue changes are pushed by the queue module. Avoid cloning and rendering
+  // the entire queue every second while large imports are idle.
   useEffect(() => {
-    const interval = setInterval(() => {
-      setQueueTasks([...getQueue()])
-    }, 1000)
-    return () => clearInterval(interval)
+    return subscribeIngestQueue((tasks) => setQueueTasks([...tasks]))
   }, [])
 
   useEffect(() => {

@@ -26,6 +26,29 @@ export interface IngestTask {
 // ── State ─────────────────────────────────────────────────────────────────
 
 let queue: IngestTask[] = []
+type QueueListener = (tasks: readonly IngestTask[]) => void
+const queueListeners = new Set<QueueListener>()
+
+function notifyQueueListeners(): void {
+  const snapshot = queue.map((task) => ({ ...task }))
+  for (const listener of queueListeners) {
+    try {
+      listener(snapshot)
+    } catch (err) {
+      console.warn("[Ingest Queue] Queue subscriber failed:", err)
+    }
+  }
+}
+
+export function subscribeIngestQueue(listener: QueueListener): () => void {
+  queueListeners.add(listener)
+  try {
+    listener(queue.map((task) => ({ ...task })))
+  } catch (err) {
+    console.warn("[Ingest Queue] Queue subscriber failed:", err)
+  }
+  return () => queueListeners.delete(listener)
+}
 interface ActiveIngestRun {
   taskId: string
   epoch: number
@@ -103,6 +126,7 @@ async function saveQueue(projectPath: string): Promise<void> {
   // Capture the snapshot now, then serialize writes so an older async write
   // can never land after a newer queue state.
   const toSave = queue.filter((t) => t.status !== "done")
+  notifyQueueListeners()
   const snapshot = JSON.stringify(toSave, null, 2)
   await new Promise<void>((resolve) => {
     pendingActiveQueueWrites.push({
@@ -848,6 +872,7 @@ export function clearQueueState(): void {
   for (const request of pendingActiveQueueWrites.splice(0)) request.resolve()
   commitCoordinator = new IngestCommitCoordinator()
   workerLimit = 1
+  notifyQueueListeners()
 }
 
 /**
@@ -914,6 +939,7 @@ export async function pauseQueue(): Promise<void> {
   currentProjectPath = ""
   processedSinceDrain = false
   resetQueueAccounting()
+  notifyQueueListeners()
 }
 
 // ── Restore on startup ───────────────────────────────────────────────────
@@ -951,7 +977,10 @@ export async function restoreQueue(
 
   const saved = await loadQueue(pp, projectId)
 
-  if (saved.length === 0) return
+  if (saved.length === 0) {
+    notifyQueueListeners()
+    return
+  }
 
   // Drop any cross-project contamination (shouldn't happen in practice
   // but defends against a corrupt queue file).

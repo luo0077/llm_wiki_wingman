@@ -75,6 +75,7 @@ import {
   isQueuePaused,
   setIngestWorkerLimit,
   getIngestWorkerLimit,
+  subscribeIngestQueue,
 } from "./ingest-queue"
 import { autoIngest } from "./ingest"
 import { deleteFile, readFile, writeFile } from "@/commands/fs"
@@ -128,6 +129,35 @@ beforeEach(async () => {
 })
 
 describe("ingest-queue — enqueue & basic processing", () => {
+  it("pushes queue snapshots only while a subscriber is active", async () => {
+    const run = createDeferred<string[]>()
+    mockAutoIngest.mockReturnValue(run.promise)
+    const snapshots: string[][] = []
+    const unsubscribe = subscribeIngestQueue((tasks) => {
+      snapshots.push(tasks.map((task) => task.sourcePath))
+    })
+
+    await enqueueIngest(TEST_ID, "raw/sources/report.pdf")
+    expect(snapshots.some((paths) => paths.includes("raw/sources/report.pdf"))).toBe(true)
+
+    const countBeforeUnsubscribe = snapshots.length
+    unsubscribe()
+    clearQueueState()
+    expect(snapshots).toHaveLength(countBeforeUnsubscribe)
+    run.resolve([])
+  })
+
+  it("does not let a queue subscriber failure block persistence", async () => {
+    mockAutoIngest.mockReturnValue(new Promise(() => {}))
+    const unsubscribe = subscribeIngestQueue(() => {
+      throw new Error("subscriber failed")
+    })
+
+    await expect(enqueueIngest(TEST_ID, "raw/sources/report.pdf")).resolves.toBeTypeOf("string")
+    expect(mockWriteFile).toHaveBeenCalled()
+    unsubscribe()
+  })
+
   it("clamps the configurable worker limit", () => {
     setIngestWorkerLimit(0)
     expect(getIngestWorkerLimit()).toBe(1)
