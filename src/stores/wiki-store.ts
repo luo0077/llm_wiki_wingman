@@ -58,6 +58,8 @@ interface LlmConfig {
   streamingEnabled?: boolean
   /** Optional headers added to every HTTP request for this provider preset. */
   customHeaders?: Record<string, string>
+  /** Optional provider-specific fields merged into custom OpenAI-compatible request bodies. */
+  extraRequestBody?: Record<string, unknown>
 }
 
 export type SearchProvider =
@@ -349,6 +351,7 @@ export interface ProviderOverride {
   requestTimeoutMinutes?: number
   streamingEnabled?: boolean
   customHeaders?: Record<string, string>
+  extraRequestBody?: Record<string, unknown>
 }
 
 export type ProviderConfigs = Record<string, ProviderOverride>

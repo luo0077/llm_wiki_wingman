@@ -2367,6 +2367,7 @@ fn project_llm_config(parsed: &Value, project_id: &str) -> Option<agent::provide
             "reasoning",
             "streamingEnabled",
             "customHeaders",
+            "extraRequestBody",
         ] {
             if let Some(value) = provider.get(key) {
                 profile_object.insert(key.to_string(), value.clone());
