@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import {
   buildReviewSuggestionPrompt,
   buildAnalysisPrompt,
+  boundWikiIndexForPrompt,
   buildChunkAnalysisSystemPrompt,
   buildGenerationPrompt,
   buildPageMergeSystemPrompt,
@@ -90,6 +91,34 @@ describe("buildAnalysisPrompt language directive", () => {
   it("does not invent schema content not present in the source", () => {
     const prompt = buildAnalysisPrompt("", "", "", "| goal | wiki/goals/ | x |")
     expect(prompt).toContain("never invent")
+  })
+})
+
+describe("wiki index prompt budget", () => {
+  it("keeps small indexes unchanged", () => {
+    expect(boundWikiIndexForPrompt("# Index\n- [[a]]", 1_000)).toBe("# Index\n- [[a]]")
+  })
+
+  it("keeps the beginning and recent tail while removing the middle", () => {
+    const index = ["# Index", ...Array.from({ length: 400 }, (_, i) => `- [[page-${i}]]`)].join("\n")
+    const bounded = boundWikiIndexForPrompt(index, 1_000)
+    expect(bounded.length).toBeLessThanOrEqual(1_000)
+    expect(bounded).toContain("# Index")
+    expect(bounded).toContain("[[page-399]]")
+    expect(bounded).not.toContain("[[page-200]]")
+    expect(bounded).toContain("middle of wiki index omitted")
+  })
+
+  it("preserves both ends of an abnormal single-line index", () => {
+    const bounded = boundWikiIndexForPrompt(`START-${"x".repeat(2_000)}-END`, 1_000)
+    expect(bounded).toContain("START-")
+    expect(bounded).toContain("-END")
+  })
+
+  it("bounds index context in analysis and generation prompts", () => {
+    const index = "# Index\n" + "entry\n".repeat(20_000)
+    expect(buildAnalysisPrompt("", index, "source").length).toBeLessThan(index.length)
+    expect(buildGenerationPrompt("", "", index, "source.md").length).toBeLessThan(index.length)
   })
 })
 

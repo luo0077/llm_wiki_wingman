@@ -63,6 +63,7 @@ const INGEST_ANALYSIS_TOKENS_MIN = 4_096
 const CONSERVATIVE_CHARS_PER_OUTPUT_TOKEN = 2
 const REVIEW_STAGE_MIN_SIGNAL_CHARS = 10_000
 const REVIEW_STAGE_MIN_FILE_BLOCKS = 4
+const WIKI_INDEX_PROMPT_MAX_CHARS = 32_000
 const AGGREGATE_WIKI_PATHS = ["wiki/index.md", "wiki/overview.md", "wiki/log.md"] as const
 
 function appendSavedImageRefsForCaption(content: string, images: SavedImage[]): string {
@@ -2417,7 +2418,7 @@ export function buildAnalysisPrompt(
       ? `## Project Schema (page types available — map source content to schema-defined types when it fits)\n${schema}`
       : "",
     purpose ? `## Wiki Purpose (for context)\n${purpose}` : "",
-    index ? `## Current Wiki Index (for checking existing content)\n${index}` : "",
+    index ? `## Current Wiki Index (for checking existing content)\n${boundWikiIndexForPrompt(index)}` : "",
   ].filter(Boolean).join("\n")
 }
 
@@ -2553,7 +2554,7 @@ export function buildGenerationPrompt(
     "  SEARCH: automated technical debt detection AI generated code | software quality metrics LLM code generation | static analysis tools agentic software development",
     "",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
-    index ? `## Current Wiki Index (preserve all existing entries, add new ones)\n${index}` : "",
+    index ? `## Current Wiki Index (preserve all existing entries, add new ones)\n${boundWikiIndexForPrompt(index)}` : "",
     overview ? `## Current Overview (update this to reflect the new source)\n${overview}` : "",
     "",
     // ── OUTPUT FORMAT MUST BE THE LAST SECTION — models weight recent instructions highest ──
@@ -2644,7 +2645,7 @@ export function buildReviewSuggestionPrompt(
     "Return REVIEW blocks only. Do not output FILE blocks. Do not wrap the response in markdown fences.",
     "",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
-    index ? `## Current Wiki Index\n${trimLongText(index, indexCap)}` : "",
+    index ? `## Current Wiki Index\n${boundWikiIndexForPrompt(index, indexCap)}` : "",
     "",
     `## Source\n${sourceIdentity}`,
     "",
@@ -2935,6 +2936,23 @@ function trimLongText(text: string, maxChars: number): string {
   return `${text.slice(0, maxChars).trimEnd()}\n\n[...trimmed for prompt budget...]`
 }
 
+export function boundWikiIndexForPrompt(
+  index: string,
+  maxChars = WIKI_INDEX_PROMPT_MAX_CHARS,
+): string {
+  const safeMax = Math.max(1_000, Math.floor(maxChars))
+  if (index.length <= safeMax) return index
+  const marker = "\n\n[...middle of wiki index omitted for prompt budget...]\n\n"
+  const available = Math.max(1, safeMax - marker.length)
+  const headLength = Math.floor(available * 0.6)
+  const tailLength = available - headLength
+  const rawHead = index.slice(0, headLength)
+  const rawTail = index.slice(-tailLength)
+  const head = (rawHead.includes("\n") ? rawHead.replace(/\n[^\n]*$/, "") : rawHead).trimEnd()
+  const tail = (rawTail.includes("\n") ? rawTail.replace(/^[^\n]*\n?/, "") : rawTail).trimStart()
+  return `${head}${marker}${tail}`
+}
+
 function trimInlineStatus(text: string, maxChars = 240): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars).trimEnd()}...`
 }
@@ -3121,7 +3139,7 @@ export function buildChunkAnalysisSystemPrompt(
     "Stable project context follows. It changes rarely and should be treated as background:",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
     schema ? `## Wiki Schema\n${schema}` : "",
-    index ? `## Current Wiki Index\n${trimLongText(index, 40_000)}` : "",
+    index ? `## Current Wiki Index\n${boundWikiIndexForPrompt(index)}` : "",
   ].filter(Boolean).join("\n")
 }
 
@@ -3584,7 +3602,7 @@ export async function startIngest(
     "",
     purpose ? `## Wiki Purpose\n${purpose}` : "",
     schema ? `## Wiki Schema\n${schema}` : "",
-    index ? `## Current Wiki Index\n${index}` : "",
+    index ? `## Current Wiki Index\n${boundWikiIndexForPrompt(index)}` : "",
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -3674,7 +3692,7 @@ async function executeIngestWritesImpl(
     userGuidance ? `Additional guidance: ${userGuidance}` : "",
     "",
     schema ? `## Wiki Schema\n${schema}` : "",
-    index ? `## Current Wiki Index\n${index}` : "",
+    index ? `## Current Wiki Index\n${boundWikiIndexForPrompt(index)}` : "",
     activeSourceIdentity && activeSourceSummaryPath
       ? [
           `## Source File`,
