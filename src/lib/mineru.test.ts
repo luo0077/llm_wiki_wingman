@@ -423,6 +423,39 @@ describe("parseWithMineru", () => {
     expect(mockHttpFetch.mock.calls[3]?.[1]?.headers).toEqual({ "X-Upload-Token": "signed" })
   })
 
+  it("resolves relative V1 upload URLs below the V1 API base", async () => {
+    mockHttpFetch
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
+      .mockResolvedValueOnce(jsonResponse({
+        id: "upload-1",
+        status: "pending",
+        upload_url: "uploads/upload-1/content",
+        upload_method: "PUT",
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ status: "completed", file: { id: "source-1" } }))
+      .mockResolvedValueOnce(jsonResponse({
+        job_id: "job-1",
+        status: "completed",
+        files: [{ status: "completed", output_files: { zip: { file_id: "zip-1" } } }],
+      }))
+      .mockResolvedValueOnce(await zipResponse({ "full.md": "parsed" }))
+
+    await parseWithMineru({
+      enabled: true,
+      backend: "local",
+      localToken: "local-secret",
+      localBackend: "hybrid-engine",
+      token: "",
+      modelVersion: "vlm",
+    }, "/tmp/report.pdf")
+
+    expect(mockHttpFetch.mock.calls[3]?.[0]).toBe(
+      "http://127.0.0.1:8000/v1/uploads/upload-1/content",
+    )
+  })
+
   it("submits a Windows-path PDF and pipeline mode to a custom local endpoint", async () => {
     mockHttpFetch
       .mockResolvedValueOnce(jsonResponse({

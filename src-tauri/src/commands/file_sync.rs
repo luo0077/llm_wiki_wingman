@@ -1483,30 +1483,38 @@ mod tests {
 
     #[test]
     fn read_only_access_events_do_not_count_as_content_changes() {
-        assert!(!is_content_change_event(&EventKind::Access(AccessKind::Open(
-            AccessMode::Any
-        ))));
-        assert!(!is_content_change_event(&EventKind::Access(AccessKind::Open(
-            AccessMode::Read
-        ))));
-        assert!(!is_content_change_event(&EventKind::Access(AccessKind::Read)));
-        assert!(!is_content_change_event(&EventKind::Access(AccessKind::Close(
-            AccessMode::Read
-        ))));
-        assert!(!is_content_change_event(&EventKind::Access(AccessKind::Any)));
+        assert!(!is_content_change_event(&EventKind::Access(
+            AccessKind::Open(AccessMode::Any)
+        )));
+        assert!(!is_content_change_event(&EventKind::Access(
+            AccessKind::Open(AccessMode::Read)
+        )));
+        assert!(!is_content_change_event(&EventKind::Access(
+            AccessKind::Read
+        )));
+        assert!(!is_content_change_event(&EventKind::Access(
+            AccessKind::Close(AccessMode::Read)
+        )));
+        assert!(!is_content_change_event(&EventKind::Access(
+            AccessKind::Any
+        )));
     }
 
     #[test]
     fn finished_writes_and_non_access_events_still_count() {
-        assert!(is_content_change_event(&EventKind::Access(AccessKind::Close(
-            AccessMode::Write
-        ))));
-        assert!(is_content_change_event(&EventKind::Create(CreateKind::File)));
+        assert!(is_content_change_event(&EventKind::Access(
+            AccessKind::Close(AccessMode::Write)
+        )));
+        assert!(is_content_change_event(&EventKind::Create(
+            CreateKind::File
+        )));
         assert!(is_content_change_event(&EventKind::Modify(ModifyKind::Any)));
-        assert!(is_content_change_event(&EventKind::Modify(ModifyKind::Name(
-            RenameMode::To
-        ))));
-        assert!(is_content_change_event(&EventKind::Remove(RemoveKind::File)));
+        assert!(is_content_change_event(&EventKind::Modify(
+            ModifyKind::Name(RenameMode::To)
+        )));
+        assert!(is_content_change_event(&EventKind::Remove(
+            RemoveKind::File
+        )));
         assert!(is_content_change_event(&EventKind::Any));
         assert!(is_content_change_event(&EventKind::Other));
     }

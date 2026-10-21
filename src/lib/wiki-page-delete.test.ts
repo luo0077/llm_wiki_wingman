@@ -511,4 +511,20 @@ describe("cascadeDeleteWikiPagesWithRefs", () => {
       { id: "general" },
     ])
   })
+
+  it("preserves case-distinct review paths on case-sensitive project paths", async () => {
+    const target = `${PROJECT}/wiki/entities/Foo.md`
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path === target) return "---\ntitle: Foo\n---\n"
+      throw new Error(`unexpected read ${path}`)
+    })
+    mockListDirectory.mockResolvedValueOnce([])
+    mockLoadReviewItems.mockResolvedValueOnce([
+      { id: "lowercase", affectedPages: ["entities/foo.md"] },
+    ])
+
+    await cascadeDeleteWikiPagesWithRefs(PROJECT, [target])
+
+    expect(mockSaveReviewItems).not.toHaveBeenCalled()
+  })
 })

@@ -346,7 +346,10 @@ fn handle_request(
     if !is_authorized(app, query, headers) {
         return err(401, "Unauthorized");
     }
-    if !matches!(method, &Method::Get | &Method::Post | &Method::Patch | &Method::Delete) {
+    if !matches!(
+        method,
+        &Method::Get | &Method::Post | &Method::Patch | &Method::Delete
+    ) {
         return err(405, "Method not allowed");
     }
 

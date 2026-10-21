@@ -775,7 +775,7 @@ async function parseWithLocalMineruV1(
     if (!uploadId || typeof upload.upload_url !== "string") {
       throw new Error("Local MinerU V1 returned an invalid upload session")
     }
-    const uploadUrl = new URL(upload.upload_url, apiBase).toString()
+    const uploadUrl = new URL(upload.upload_url, `${apiBase}/`).toString()
     const returnedHeaders = upload.upload_headers && typeof upload.upload_headers === "object"
       ? Object.fromEntries(Object.entries(upload.upload_headers).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
       : {}

@@ -134,12 +134,19 @@ async function pruneDeletedPagesFromReviews(
   projectPath: string,
   deletedPaths: readonly string[],
 ): Promise<void> {
-  const deleted = new Set(deletedPaths.map((path) => normalizePath(path).toLowerCase()))
+  const pathKey = (path: string) => {
+    const normalized = normalizePath(path)
+    return /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//")
+      ? normalized.toLowerCase()
+      : normalized
+  }
+  const projectKey = pathKey(projectPath)
+  const deleted = new Set(deletedPaths.map(pathKey))
   const toAbsolute = (path: string) => {
     const normalized = normalizePath(path)
-    if (normalized.startsWith(`${projectPath}/`)) return normalized.toLowerCase()
+    if (pathKey(normalized).startsWith(`${projectKey}/`)) return pathKey(normalized)
     const relative = normalized.replace(/^wiki\//i, "")
-    return `${projectPath}/wiki/${relative}`.toLowerCase()
+    return pathKey(`${projectPath}/wiki/${relative}`)
   }
   try {
     const reviews = await loadReviewItems(projectPath)
@@ -154,7 +161,7 @@ async function pruneDeletedPagesFromReviews(
     if (!changed) return
     await saveReviewItems(projectPath, remaining)
     const activeProject = (await import("@/stores/wiki-store")).useWikiStore.getState().project
-    if (activeProject && normalizePath(activeProject.path) === projectPath) {
+    if (activeProject && pathKey(activeProject.path) === projectKey) {
       useReviewStore.getState().setItems(remaining)
     }
   } catch (err) {
