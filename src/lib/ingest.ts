@@ -1277,6 +1277,7 @@ async function autoIngestImpl(
     signal,
     activityId,
     onFileWritten,
+    previouslyCompletedPaths.includes(sourceSummaryPath),
   )
   throwIfIngestAborted(signal, activityId)
   const writtenPaths = uniqueNormalizedPaths([
@@ -1355,6 +1356,7 @@ async function autoIngestImpl(
           signal,
           activityId,
           onFileWritten,
+          writtenPaths.includes(sourceSummaryPath),
         )
         // Match successful writes against the paths requested from the model,
         // not the final on-disk paths. writeFileBlocks may legitimately rewrite
@@ -2013,6 +2015,22 @@ function setOrAppendFrontmatterDate(payload: string, key: "created" | "updated",
   return `${payload.trimEnd()}\n${key}: ${date}`
 }
 
+function sourceSummaryBlockWarning(
+  path: string,
+  sourceSummaryPath: string | undefined,
+  summaryWritten: boolean,
+): string | null {
+  const normalized = normalizePath(path)
+  if (!sourceSummaryPath || !normalized.toLowerCase().startsWith("wiki/sources/")) return null
+  if (normalized !== sourceSummaryPath) {
+    return `Ignored unexpected source summary "${path}"; only "${sourceSummaryPath}" may describe the current source.`
+  }
+  if (summaryWritten) {
+    return `Ignored duplicate source summary "${path}"; the first successful summary was preserved.`
+  }
+  return null
+}
+
 async function writeFileBlocks(
   projectPath: string,
   text: string,
@@ -2022,6 +2040,7 @@ async function writeFileBlocks(
   signal?: AbortSignal,
   activityId?: string,
   onFileWritten?: (relativePath: string) => void,
+  summaryAlreadyWritten = false,
 ): Promise<{
   writtenPaths: string[]
   completedInputPaths: string[]
@@ -2032,6 +2051,7 @@ async function writeFileBlocks(
   const { blocks, warnings: parseWarnings, truncatedPaths } = parseFileBlocks(text)
   const warnings = [...parseWarnings]
   const writtenPaths: string[] = []
+  let summaryWritten = summaryAlreadyWritten
   // Keep the model-requested path separate from the final path. Path
   // canonicalization may rename the file after parsing, but callers that
   // repair a specific FILE block still need to know that request succeeded.
@@ -2052,9 +2072,11 @@ async function writeFileBlocks(
 
   for (const { path: rawRelativePath, content: rawContent } of blocks) {
     throwIfIngestAborted(signal, activityId)
-    let relativePath = rawRelativePath
-    if (sourceSummaryPath && relativePath.startsWith("wiki/sources/")) {
-      relativePath = sourceSummaryPath
+    let relativePath = normalizePath(rawRelativePath)
+    const summaryWarning = sourceSummaryBlockWarning(relativePath, sourceSummaryPath, summaryWritten)
+    if (summaryWarning) {
+      warnings.push(summaryWarning)
+      continue
     }
     if (isAppManagedAggregatePath(relativePath)) {
       warnings.push(
@@ -2113,6 +2135,14 @@ async function writeFileBlocks(
         warnings.push(msg)
         continue
       }
+    }
+
+    // Schema routing can move another typed page into wiki/sources/, so
+    // enforce the same boundary again on its final destination.
+    const routedSummaryWarning = sourceSummaryBlockWarning(relativePath, sourceSummaryPath, summaryWritten)
+    if (routedSummaryWarning) {
+      warnings.push(routedSummaryWarning)
+      continue
     }
 
     // Language guard: reject individual FILE blocks whose body contradicts
@@ -2198,6 +2228,7 @@ async function writeFileBlocks(
         await writeFile(fullPath, toWrite)
       }
       writtenPaths.push(relativePath)
+      if (relativePath === sourceSummaryPath) summaryWritten = true
       completedInputPaths.push(rawRelativePath)
       onFileWritten?.(relativePath)
     } catch (err) {
@@ -2208,12 +2239,17 @@ async function writeFileBlocks(
     }
   }
 
+  const repairableTruncatedPaths = truncatedPaths.filter((path) => {
+    const warning = sourceSummaryBlockWarning(path, sourceSummaryPath, summaryWritten)
+    if (warning) warnings.push(warning)
+    return !warning
+  })
   return {
     writtenPaths,
     completedInputPaths,
     warnings,
     hardFailures,
-    truncatedPaths,
+    truncatedPaths: repairableTruncatedPaths,
   }
 }
 
@@ -2428,6 +2464,7 @@ export function buildGenerationPrompt(
     "## What to generate",
     "",
     `1. A source summary page at **${summaryPath}** (MUST use this exact path)`,
+    "Emit exactly one source summary FILE block. Do not create additional wiki/sources/ pages for works merely cited by the source; keep those citations in the summary or link to existing pages.",
     "2. Entity or schema-defined typed pages for key named things identified in the analysis. Prefer schema-defined directories when present; otherwise use wiki/entities/.",
     "3. Concept or schema-defined typed pages for key ideas, methods, techniques, and abstractions. Prefer schema-defined directories when present; otherwise use wiki/concepts/.",
     "4. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)",
@@ -3642,6 +3679,7 @@ async function executeIngestWritesImpl(
           `## Source File`,
           `The original source file is: **${activeSourceIdentity}**`,
           `If you generate a source summary page, it MUST use this exact path: **${activeSourceSummaryPath}**.`,
+          "Emit at most one source summary FILE block. Do not generate other wiki/sources/ pages for cited works.",
           `Every page generated from this source MUST include "${activeSourceIdentity}" in its frontmatter \`sources\` field.`,
         ].join("\n")
       : "",
@@ -3704,18 +3742,19 @@ async function executeIngestWritesImpl(
   )
 
   const writtenPaths: string[] = []
+  const summaryWarnings: string[] = []
+  let summaryWritten = false
   const matches = accumulated.matchAll(FILE_BLOCK_REGEX)
 
   for (const match of matches) {
-    let relativePath = match[1].trim()
+    const relativePath = normalizePath(match[1].trim())
     let content = match[2]
 
     if (!relativePath) continue
-    if (
-      activeSourceSummaryPath &&
-      relativePath.startsWith("wiki/sources/")
-    ) {
-      relativePath = activeSourceSummaryPath
+    const summaryWarning = sourceSummaryBlockWarning(relativePath, activeSourceSummaryPath ?? undefined, summaryWritten)
+    if (summaryWarning) {
+      summaryWarnings.push(summaryWarning)
+      continue
     }
 
     if (!isSafeIngestPath(relativePath) || isAppManagedAggregatePath(relativePath)) {
@@ -3746,9 +3785,15 @@ async function executeIngestWritesImpl(
         await writeFile(fullPath, content)
       }
       writtenPaths.push(fullPath)
+      if (relativePath === activeSourceSummaryPath) summaryWritten = true
     } catch (err) {
       console.error(`Failed to write ${fullPath}:`, err)
     }
+  }
+
+  if (summaryWarnings.length > 0) {
+    await appendIngestWarningLog(pp, activeSourceIdentity ?? "", summaryWarnings)
+    getStore().addMessage("system", `Ingest warnings:\n${summaryWarnings.map((warning) => `- ${warning}`).join("\n")}`)
   }
 
   if (writtenPaths.length > 0) {
