@@ -1032,6 +1032,8 @@
     }
   },
   "preview": {
+    "back": "后退",
+    "forward": "前进",
     "selectFile": "选择文件以预览",
     "notAvailable": "该文件类型暂不支持预览",
     "viewAsText": "作为文本查看",

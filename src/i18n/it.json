@@ -1032,6 +1032,8 @@
     }
   },
   "preview": {
+    "back": "Indietro",
+    "forward": "Avanti",
     "selectFile": "Seleziona un file da visualizzare",
     "notAvailable": "Anteprima non disponibile per questo tipo di file",
     "viewAsText": "Visualizza come testo",

@@ -1032,6 +1032,8 @@
     }
   },
   "preview": {
+    "back": "Back",
+    "forward": "Forward",
     "selectFile": "Select a file to preview",
     "notAvailable": "Preview not available for this file type",
     "viewAsText": "View as text",
