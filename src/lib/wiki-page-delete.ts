@@ -35,6 +35,8 @@ import {
   writeFrontmatterArray,
 } from "@/lib/sources-merge"
 import type { FileNode } from "@/types/wiki"
+import { loadReviewItems, saveReviewItems } from "@/lib/persist"
+import { useReviewStore } from "@/stores/review-store"
 
 /**
  * Detect whether a wiki page lives under `wiki/sources/`. We treat
@@ -126,6 +128,38 @@ export interface CascadeDeleteResult {
   deletedPaths: string[]
   /** How many surviving wiki files we rewrote to drop stale refs. */
   rewrittenFiles: number
+}
+
+async function pruneDeletedPagesFromReviews(
+  projectPath: string,
+  deletedPaths: readonly string[],
+): Promise<void> {
+  const deleted = new Set(deletedPaths.map((path) => normalizePath(path).toLowerCase()))
+  const toAbsolute = (path: string) => {
+    const normalized = normalizePath(path)
+    if (normalized.startsWith(`${projectPath}/`)) return normalized.toLowerCase()
+    const relative = normalized.replace(/^wiki\//i, "")
+    return `${projectPath}/wiki/${relative}`.toLowerCase()
+  }
+  try {
+    const reviews = await loadReviewItems(projectPath)
+    let changed = false
+    const remaining = reviews.flatMap((item) => {
+      if (!item.affectedPages?.length) return [item]
+      const affectedPages = item.affectedPages.filter((path) => !deleted.has(toAbsolute(path)))
+      if (affectedPages.length === item.affectedPages.length) return [item]
+      changed = true
+      return affectedPages.length > 0 ? [{ ...item, affectedPages }] : []
+    })
+    if (!changed) return
+    await saveReviewItems(projectPath, remaining)
+    const activeProject = (await import("@/stores/wiki-store")).useWikiStore.getState().project
+    if (activeProject && normalizePath(activeProject.path) === projectPath) {
+      useReviewStore.getState().setItems(remaining)
+    }
+  } catch (err) {
+    console.warn("[wiki-delete] failed to prune orphaned reviews:", err)
+  }
 }
 
 /**
@@ -240,6 +274,8 @@ export async function cascadeDeleteWikiPagesWithRefs(
       }
     }
   }
+
+  await pruneDeletedPagesFromReviews(pp, result.deletedPaths)
 
   return result
 }

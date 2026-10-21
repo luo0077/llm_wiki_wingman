@@ -12,6 +12,7 @@ import {
   computeIngestSourceBudget,
   formatIngestWarningLogEntry,
   splitSourceIntoSemanticChunks,
+  updateBoundedOverviewRecentSection,
 } from "./ingest"
 import { useWikiStore } from "@/stores/wiki-store"
 
@@ -355,5 +356,23 @@ describe("long-source ingest planning", () => {
     expect(chunks.some((chunk) => chunk.headingPath.includes("Section Two"))).toBe(true)
     expect(chunks[1].overlapBefore.length).toBeGreaterThan(0)
     expect(chunks[1].main.startsWith(chunks[0].main.slice(-200))).toBe(false)
+  })
+})
+
+describe("overview maintenance", () => {
+  it("adds a bounded managed section without replacing user content", () => {
+    const original = "# Overview\n\nUser-maintained summary.\n"
+    const updated = updateBoundedOverviewRecentSection(original, ["- [[entities/a]] — A"])
+    expect(updated).toContain("User-maintained summary.")
+    expect(updated).toContain("<!-- llm-wiki:recent-start -->")
+    expect(updated).toContain("- [[entities/a]] — A")
+  })
+
+  it("updates the managed section idempotently and limits it to 50 entries", () => {
+    const additions = Array.from({ length: 60 }, (_, index) => `- [[p-${index}]] — P ${index}`)
+    const once = updateBoundedOverviewRecentSection("# Overview\n", additions)
+    const twice = updateBoundedOverviewRecentSection(once, [additions[0]])
+    expect(twice).toBe(once)
+    expect(twice.match(/^- \[\[/gm)).toHaveLength(50)
   })
 })

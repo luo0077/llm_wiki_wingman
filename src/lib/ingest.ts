@@ -1389,9 +1389,13 @@ async function autoIngestImpl(
       writtenPaths.push("wiki/index.md")
       onFileWritten?.("wiki/index.md")
     }
+    if (await updateWikiOverviewDeterministically(pp, writtenPaths)) {
+      writtenPaths.push("wiki/overview.md")
+      onFileWritten?.("wiki/overview.md")
+    }
   } catch (err) {
     writeWarnings.push(
-      `Deterministic index update failed: ${err instanceof Error ? err.message : String(err)}`,
+      `Deterministic aggregate update failed: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
 
@@ -1725,6 +1729,72 @@ async function updateWikiIndexDeterministically(
 
   await writeFile(indexPath, updateBoundedRecentIndexSection(index, additions))
   return true
+}
+
+const OVERVIEW_RECENT_START = "<!-- llm-wiki:recent-start -->"
+const OVERVIEW_RECENT_END = "<!-- llm-wiki:recent-end -->"
+
+async function updateWikiOverviewDeterministically(
+  projectPath: string,
+  writtenPaths: string[],
+): Promise<boolean> {
+  const candidates = Array.from(new Set(writtenPaths.map(normalizePath))).filter((path) =>
+    path.startsWith("wiki/")
+      && path.endsWith(".md")
+      && !AGGREGATE_WIKI_PATHS.includes(path as (typeof AGGREGATE_WIKI_PATHS)[number]),
+  )
+  if (candidates.length === 0) return false
+
+  const overviewPath = `${projectPath}/wiki/overview.md`
+  const overview = await readFile(overviewPath).catch(() => [
+    "---",
+    "type: overview",
+    "title: Project Overview",
+    "tags: []",
+    "related: []",
+    "---",
+    "",
+    "# Overview",
+    "",
+  ].join("\n"))
+  const additions: string[] = []
+  for (const path of candidates) {
+    const target = path.replace(/^wiki\//, "").replace(/\.md$/i, "")
+    const content = await readFile(`${projectPath}/${path}`).catch(() => "")
+    const parsed = parseFrontmatter(content)
+    const title = typeof parsed.frontmatter?.title === "string"
+      ? parsed.frontmatter.title.trim()
+      : getFileName(path).replace(/\.md$/i, "")
+    additions.push(`- [[${target}]] — ${title}`)
+  }
+  const updated = updateBoundedOverviewRecentSection(overview, additions)
+  if (updated === overview) return false
+  await writeFile(overviewPath, updated)
+  return true
+}
+
+export function updateBoundedOverviewRecentSection(
+  overview: string,
+  additions: string[],
+): string {
+  const start = overview.indexOf(OVERVIEW_RECENT_START)
+  const end = overview.indexOf(OVERVIEW_RECENT_END)
+  const existing = start >= 0 && end > start
+    ? overview.slice(start + OVERVIEW_RECENT_START.length, end)
+      .split("\n")
+      .filter((line) => /^-\s+/.test(line))
+    : []
+  const recent = Array.from(new Set([...additions, ...existing])).slice(0, 50)
+  const block = [
+    OVERVIEW_RECENT_START,
+    "## Recently Updated",
+    ...recent,
+    OVERVIEW_RECENT_END,
+  ].join("\n")
+  if (start >= 0 && end > start) {
+    return `${overview.slice(0, start)}${block}${overview.slice(end + OVERVIEW_RECENT_END.length)}`
+  }
+  return `${overview.trimEnd()}\n\n${block}\n`
 }
 
 function normalizeIndexTarget(target: string): string {
