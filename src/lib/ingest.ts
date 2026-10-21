@@ -60,20 +60,10 @@ const INGEST_GENERATION_TOKENS_128K = 16_384
 const INGEST_GENERATION_TOKENS_256K = 24_576
 const INGEST_GENERATION_TOKENS_512K = 32_768
 const INGEST_ANALYSIS_TOKENS_MIN = 4_096
-const INGEST_ANALYSIS_TOKENS_MAX = 8_192
-const CONSERVATIVE_CHARS_PER_OUTPUT_TOKEN = 4
+const CONSERVATIVE_CHARS_PER_OUTPUT_TOKEN = 2
 const REVIEW_STAGE_MIN_SIGNAL_CHARS = 10_000
 const REVIEW_STAGE_MIN_FILE_BLOCKS = 4
 const AGGREGATE_WIKI_PATHS = ["wiki/index.md", "wiki/overview.md", "wiki/log.md"] as const
-
-export class NonRetryableIngestError extends Error {
-  readonly nonRetryable = true
-
-  constructor(message: string) {
-    super(message)
-    this.name = "NonRetryableIngestError"
-  }
-}
 
 function appendSavedImageRefsForCaption(content: string, images: SavedImage[]): string {
   if (images.length === 0) return content
@@ -96,7 +86,7 @@ function ingestAnalysisRequest(config: LlmConfig): {
         ...requested,
         budgetTokens: Math.max(
           1_024,
-          Math.min(requested.budgetTokens ?? 0, INGEST_ANALYSIS_TOKENS_MAX),
+          Math.min(requested.budgetTokens ?? 0, computeIngestGenerationMaxTokens(config.maxContextSize)),
         ),
       }
     : requested
@@ -1103,9 +1093,9 @@ async function autoIngestImpl(
     if (analysisTruncated) {
       const message =
         `Analysis was truncated after reaching the ${analysisRequest.maxTokens.toLocaleString()} token output limit. ` +
-        "Wiki pages were not generated from the incomplete analysis. Split the source or use a model with a larger output limit."
+        "Wiki pages were not generated from the incomplete analysis. The saved queue task will retry; if it repeats, split the source or choose a model with a larger output limit."
       activity.updateItem(activityId, { status: "error", detail: message })
-      throw new NonRetryableIngestError(message)
+      throw new Error(message)
     }
   }
 
@@ -2344,6 +2334,15 @@ const ENTITY_ANALYSIS_RULES = [
   "Canonical naming priority: reuse the exact title of an existing wiki page first; otherwise preserve the source spelling. Widely used localized names may be recorded as aliases, but never invent or phonetically guess a name.",
 ] as const
 
+const ANALYSIS_OUTPUT_LIMITS = [
+  "HARD OUTPUT LIMITS: a response exceeding these limits is invalid.",
+  "- Key Entities: at most 25 candidates, one compact line per candidate, no table.",
+  "- Key Concepts: at most 25 entries.",
+  "- Main Arguments & Findings: at most 15 entries.",
+  "- Connections, Contradictions, and Recommendations: at most 8 entries per section.",
+  "- Total response: at most 16,000 characters. Prefer high-value reusable knowledge over exhaustive enumeration.",
+] as const
+
 const ENTITY_PAGE_RULES = [
   "Create a standalone entity page only for a candidate explicitly marked `Page-worthy: yes`. Keep other mentions as plain prose in the source summary, or as wikilinks only when the target already exists in the current wiki index.",
   "Canonical naming priority: reuse the exact title of an existing wiki page first; otherwise preserve the source spelling. A widely used localized name may be an alias, but never invent or phonetically guess a name.",
@@ -2374,6 +2373,7 @@ export function buildAnalysisPrompt(
     languageRule(sourceContent),
     "",
     "Your analysis should cover:",
+    ...ANALYSIS_OUTPUT_LIMITS,
     "",
     "## Key Entities",
     "List candidate named people, organizations, products, datasets, and tools. For each:",
@@ -2798,12 +2798,12 @@ export function computeIngestAnalysisMaxTokens(maxContextSize: number | undefine
   return clampNumber(
     reservedOutputTokens,
     INGEST_ANALYSIS_TOKENS_MIN,
-    INGEST_ANALYSIS_TOKENS_MAX,
+    computeIngestGenerationMaxTokens(maxContextSize),
   )
 }
 
 export function computeIngestReviewMaxTokens(maxContextSize: number | undefined): number {
-  return Math.min(8_192, Math.max(4_096, Math.floor(computeIngestGenerationMaxTokens(maxContextSize) / 2)))
+  return Math.min(16_384, Math.max(4_096, Math.floor(computeIngestGenerationMaxTokens(maxContextSize) / 2)))
 }
 
 function splitOversizedBlock(block: string, targetChars: number): string[] {
@@ -3100,6 +3100,7 @@ export function buildChunkAnalysisSystemPrompt(
     languageRule(sourceContent),
     "",
     "Output exactly two markdown sections:",
+    "HARD OUTPUT LIMITS: each section must stay within 60 lines; list at most 25 entities and 25 concepts; never use a table for entity enumeration.",
     "",
     "## Chunk Analysis",
     "- Concise summary of the main chunk",

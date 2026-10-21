@@ -50,6 +50,8 @@ describe("buildAnalysisPrompt language directive", () => {
     expect(prompt).toContain("## Key Concepts")
     expect(prompt).toContain("## Main Arguments & Findings")
     expect(prompt).toContain("## Recommendations")
+    expect(prompt).toContain("Key Entities: at most 25 candidates")
+    expect(prompt).toContain("Total response: at most 16,000 characters")
   })
 
   it("requires claims to stay attached to their named subject", () => {
@@ -184,6 +186,7 @@ describe("buildGenerationPrompt language directive", () => {
     expect(prompt).toContain("accumulate recurrence across chunks")
     expect(prompt).toContain("supporting chunks")
     expect(prompt).toContain("Page-worthy: yes")
+    expect(prompt).toContain("each section must stay within 60 lines")
   })
 
   it("makes project schema routing authoritative over default entity and concept folders", () => {
@@ -285,11 +288,11 @@ describe("long-source ingest planning", () => {
     expect(computeIngestGenerationMaxTokens(128_000)).toBe(16_384)
     expect(computeIngestGenerationMaxTokens(256_000)).toBe(24_576)
     expect(computeIngestGenerationMaxTokens(1_000_000)).toBe(32_768)
-    expect(computeIngestAnalysisMaxTokens(64_000)).toBe(4_096)
-    expect(computeIngestAnalysisMaxTokens(128_000)).toBe(4_800)
-    expect(computeIngestAnalysisMaxTokens(256_000)).toBe(8_192)
-    expect(computeIngestAnalysisMaxTokens(1_000_000)).toBe(8_192)
-    expect(computeIngestReviewMaxTokens(1_000_000)).toBe(8_192)
+    expect(computeIngestAnalysisMaxTokens(64_000)).toBe(4_800)
+    expect(computeIngestAnalysisMaxTokens(128_000)).toBe(9_600)
+    expect(computeIngestAnalysisMaxTokens(256_000)).toBe(19_200)
+    expect(computeIngestAnalysisMaxTokens(1_000_000)).toBe(32_768)
+    expect(computeIngestReviewMaxTokens(1_000_000)).toBe(16_384)
   })
 
   it("scales source budget from the configured context window instead of a fixed 50k cap", () => {
