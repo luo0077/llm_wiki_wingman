@@ -366,6 +366,39 @@ describe("autoIngest source summary paths", () => {
     expect(useChatStore.getState().messages.some((m) => m.role === "system" && m.content.includes("Ingest warnings:"))).toBe(true)
   })
 
+  it.each([
+    `${"中文".repeat(35)}.md`,
+    `${"资".repeat(30)}/${"文".repeat(70)}.md`,
+  ])("ingests a long CJK source into a filesystem-safe summary: %s", async (identity) => {
+    if (!tmp) throw new Error("missing temp project")
+    sourceMarkers = ["long source ingested"]
+    await writeFileRaw(`${tmp.path}/raw/sources/${identity}`, "Long CJK filename source.\n")
+
+    const written = await autoIngest(tmp.path, `${tmp.path}/raw/sources/${identity}`, useWikiStore.getState().llmConfig)
+    const summaryPath = `wiki/sources/${sourceSummarySlugFromIdentity(identity)}.md`
+
+    expect(written).toContain(summaryPath)
+    expect(await fs.readFile(`${tmp.path}/${summaryPath}`, "utf8")).toContain("long source ingested")
+    expect(await fs.readFile(`${tmp.path}/${summaryPath}`, "utf8")).toContain(identity)
+    expect(useActivityStore.getState().items.some((item) => item.status === "error")).toBe(false)
+  })
+
+  it("keeps an existing portable CJK summary at its original path", async () => {
+    if (!tmp) throw new Error("missing temp project")
+    const stem = "中文".repeat(35)
+    const identity = `${stem}.md`
+    const oldSummaryPath = `${tmp.path}/wiki/sources/${stem}.md`
+    sourceMarkers = ["regenerated long source"]
+    await writeFileRaw(`${tmp.path}/raw/sources/${identity}`, "Updated source.\n")
+    await writeFileRaw(oldSummaryPath, `---\nsources: ["${identity}"]\n---\n# Previous summary`)
+
+    await autoIngest(tmp.path, `${tmp.path}/raw/sources/${identity}`, useWikiStore.getState().llmConfig)
+
+    const summaryPath = `${tmp.path}/wiki/sources/${sourceSummarySlugFromIdentity(identity)}.md`
+    expect(summaryPath).toBe(oldSummaryPath)
+    expect(await fs.readFile(summaryPath, "utf8")).toContain("regenerated long source")
+  })
+
   it("keeps distinct source summaries for same-basename files in different source subdirectories", async () => {
     if (!tmp) throw new Error("missing temp project")
     sourceMarkers = ["project-a config", "project-b config"]
