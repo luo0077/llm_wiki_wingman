@@ -1,0 +1,62 @@
+[project]
+name = "llm-wiki-server"
+version = "0.6.12"
+description = "Headless Python backend for LLM Wiki (replacement for the Tauri/Rust layer)"
+requires-python = ">=3.9"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+  "httpx>=0.26",
+  "pyyaml>=6",
+  # Document extraction. Loose lower bounds on purpose: pixi mixes conda and PyPI
+  # packages and a tight pin (e.g. pymupdf>=1.28.2 vs conda's 1.28.0) makes the solve fail.
+  "pypdf>=4",
+  "pymupdf>=1.24",
+  "python-docx>=1",
+  "openpyxl>=3.1",
+  "xlrd>=2",
+  "striprtf>=0.0.26",
+  "pillow>=10",
+]
+
+[project.optional-dependencies]
+# Document extraction (PDF / Office / ebook). Each is imported lazily, so the
+# server starts without them and reports a clear error for that file type.
+extract = ["pypdf>=4", "pymupdf>=1.24", "python-docx>=1", "python-pptx>=0.6", "openpyxl>=3.1", "xlrd>=2.0", "striprtf>=0.0.26", "ebooklib>=0.18", "beautifulsoup4>=4.12", "pillow>=10"]
+vector = ["lancedb>=0.10", "pyarrow>=15", "numpy>=1.26"]
+watch = ["watchdog>=4"]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[tool.pixi.pypi-dependencies]
+llm-wiki-server = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+extract = { features = ["extract"], solve-group = "default" }
+test = { features = ["test"], solve-group = "default" }
+vector = { features = ["vector"], solve-group = "default" }
+watch = { features = ["watch"], solve-group = "default" }
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+uvicorn = ">=0.54.0,<0.55"
+fastapi = ">=0.162.0,<0.163"
+httpx = ">=0.28.1,<0.29"
+pyyaml = ">=6.0.3,<7"
+pymupdf = ">=1.28.0,<2"
+pypdf = ">=6.21.4,<7"
+python-docx = ">=1.2.0,<2"
+openpyxl = ">=3.1.5,<4"
+xlrd = ">=2.0.2,<3"
+pillow = ">=13.0.0,<14"
+numpy = ">=2.5.4,<3"
+watchdog = ">=6.0.0,<7"
+pytest = ">=9.2.0,<10"

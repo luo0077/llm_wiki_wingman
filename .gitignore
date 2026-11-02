@@ -49,3 +49,13 @@ pnpm-debug.log*
 # Brainstorm assets (not tracked in source control)
 .superpowers/
 .claude/
+
+# Python server
+server/.venv/
+server/**/__pycache__/
+.pytest_cache/
+server/.pixi/
+server/*.egg-info/
+server/pixi.lock
+# keep the Python server tests (root rule above ignores every tests/ dir)
+!server/tests/

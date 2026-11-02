@@ -1,0 +1,5 @@
+# Optional. The server runs without these (falls back to polling / sqlite / pure Python).
+watchdog>=4
+numpy>=1.26
+lancedb>=0.10
+pyarrow>=15
