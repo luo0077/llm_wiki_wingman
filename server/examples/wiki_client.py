@@ -13,6 +13,8 @@ Usage:
     python wiki_client.py queue
     python wiki_client.py search "your question"
     python wiki_client.py chat "your question"
+    python wiki_client.py set-llm --endpoint https://open.bigmodel.cn/api/paas/v4 --model glm-4.7 --api-key-env ZHIPU_API_KEY
+    python wiki_client.py llm-ping                                  # test the configured model
 
 Add --project <id-or-path> to target a project other than the current one.
 """
@@ -107,6 +109,11 @@ def main():
     p = sub.add_parser("ingest-dir"); p.add_argument("dir"); p.add_argument("--no-wait", action="store_true")
     p = sub.add_parser("search"); p.add_argument("query"); p.add_argument("--top-k", type=int, default=10)
     p = sub.add_parser("chat"); p.add_argument("message")
+    p = sub.add_parser("set-llm", help="store the LLM gateway config on the server")
+    p.add_argument("--endpoint", required=True); p.add_argument("--model", required=True)
+    p.add_argument("--api-key-env", default="LLM_API_KEY", help="name of the env var holding the API key (default LLM_API_KEY)")
+    p.add_argument("--provider", default="custom"); p.add_argument("--max-context", type=int, default=128000)
+    sub.add_parser("llm-ping", help="send a tiny prompt through the configured model")
     a = ap.parse_args()
 
     if a.cmd == "check":
@@ -127,6 +134,20 @@ def main():
         r = call("POST", project_path(a.project) + "/search", {"query": a.query, "topK": a.top_k})
         for x in r.get("results", []):
             print("%6.1f  %s  %s" % (x.get("score", 0), x.get("path"), x.get("title")))
+    elif a.cmd == "set-llm":
+        key = os.environ.get(a.api_key_env, "")
+        if not key:
+            sys.exit("Environment variable %s is empty. Run:  export %s='your key'" % (a.api_key_env, a.api_key_env))
+        call("POST", "/rpc/app_state_set", {"key": "llmConfig", "value": {
+            "provider": a.provider, "apiKey": key, "model": a.model, "customEndpoint": a.endpoint,
+            "apiMode": "chat_completions", "maxContextSize": a.max_context}})
+        print("saved llmConfig: %s @ %s (key from $%s, not shown)" % (a.model, a.endpoint, a.api_key_env))
+    elif a.cmd == "llm-ping":
+        r = call("POST", "/rpc/diagnostics_llm_ping", {})
+        if r.get("ok"):
+            print("OK in %d ms: %r" % (r["ms"], r["reply"]))
+        else:
+            sys.exit("FAILED: %s\nconfig: %s" % (r.get("error"), r.get("config")))
     elif a.cmd == "chat":
         r = call("POST", project_path(a.project) + "/chat", {"message": a.message})
         print(r.get("message", {}).get("content", r))
